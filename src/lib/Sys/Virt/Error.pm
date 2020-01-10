@@ -314,6 +314,30 @@ The Hyper-V driver
 
 The capabilities driver
 
+=item Sys::Virt::Error::FROM_AUTH
+
+The authentication handling code
+
+=item Sys::Virt::Error::FROM_URI
+
+The URI handling code
+
+=item Sys::Virt::Error::FROM_DBUS
+
+The DBus handling code
+
+=item Sys::Virt::Error::FROM_DEVICE
+
+The device handling code
+
+=item Sys::Virt::Error::FROM_SSH
+
+The libSSH2 socket client
+
+=item Sys::Virt::Error::FROM_PARALLELS
+
+The Parallels virtualization driver
+
 =back
 
 =head2 ERROR CODE CONSTANTS
@@ -647,6 +671,30 @@ The user cancelled the authentication process
 =item Sys::Virt::Error::ERR_NO_DOMAIN_METADATA
 
 The requested metadata does not exist
+
+=item Sys::Virt::Error::ERR_MIGRATE_UNSAFE
+
+The migration operation would be unsafe to perform
+
+=item Sys::Virt::Error::ERR_OVERFLOW
+
+The calculation would overflow
+
+=item Sys::Virt::Error::ERR_BLOCK_COPY_ACTIVE
+
+Action prevented by block copy job
+
+=item Sys::Virt::Error::ERR_AGENT_UNRESPONSIVE
+
+The guest agent is not responding
+
+=item Sys::Virt::Error::ERR_OPERATION_UNSUPPORTED
+
+The operation is not supported on this host
+
+=item Sys::Virt::Error::ERR_SSH
+
+The SSH operation failed
 
 =back
 

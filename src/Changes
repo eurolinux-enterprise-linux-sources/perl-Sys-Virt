@@ -1,5 +1,37 @@
 Revision history for perl module Sys::Virt
 
+0.10.2 2012-09-26
+
+ - Add all new APIs and constants in libvirt 0.10.2
+ - Add some constants for macros in libvirt.h related
+   to memory/block/cpu/scheduler parametes
+ - Fix warnings building on Perl with 64 int types
+ - Disable unreliable hostname test case
+
+0.10.0 2012-09-17
+
+ - Add all new APIs and constants in libvirt 0.10.0
+ - Add example program showing use of event callbacks
+ - Fix crash when registering event callback with 'undef'
+   for the domain parameter
+ - Fix typos in the definition of some docs
+
+0.9.13 2012-07-02
+
+ - Add all new APIs and constants in libvirt 0.9.13
+
+0.9.12 2012-05-21
+
+ - Add all new constants in libvirt 0.9.12
+
+0.9.11 2012-04-16
+
+ - Add all new APIs in libvirt 0.9.11
+ - Add test case to validate API coverage
+ - Fix misc POD docs bugs
+ - Fix reference handling in block stats
+ - Add handling of VIR_TYPED_PARAM_STRING
+
 0.9.10 2012-02-12
 
  - Add all new APIs in libvirt 0.9.10

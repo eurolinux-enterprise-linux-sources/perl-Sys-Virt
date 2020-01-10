@@ -95,6 +95,10 @@ Returns a printable string representation of the raw UUID, in the format
 
 Returns a string with a locally unique name of the domain
 
+=item my $hostname = $dom->get_hostname()
+
+Returns a string representing the hostname of the guest
+
 =item my $str = $dom->get_metadata($type, $uri, $flags =0)
 
 Returns the metadata element of type C<$type> associated
@@ -162,6 +166,10 @@ by calling the C<resume> method.
 
 Resume execution of a domain previously halted with the C<suspend>
 method.
+
+=item $dom->pm_wakeup()
+
+Wakeup the guest from power management suspend state
 
 =item $dom->pm_suspend_for_duration($target, $duration, $flags=0)
 
@@ -326,6 +334,14 @@ It is not known why the domain has started
 
 The guest is running after a resume
 
+=item Sys::Virt::Domain::STATE_RUNNING_WAKEUP
+
+The guest is running after wakeup from power management suspend
+
+=item Sys::Virt::Domain::STATE_BLOCKED_UNKNOWN
+
+The guest is blocked for an unknown reason
+
 =item Sys::Virt::Domain::STATE_SHUTDOWN_UNKNOWN
 
 It is not known why the domain has shutdown
@@ -365,6 +381,10 @@ The guest is shutoff due to controlled shutdown
 =item Sys::Virt::Domain::STATE_SHUTOFF_UNKNOWN
 
 It is not known why the domain has shutoff
+
+=item Sys::Virt::Domain::STATE_PMSUSPENDED_UNKNOWN
+
+It is not known why the domain was suspended
 
 =back
 
@@ -552,10 +572,10 @@ to query the setting of the live config or inactive config.
 
 Return the scheduler type for the guest domain
 
-=item %stats = $dom->block_stats($path)
+=item $stats = $dom->block_stats($path)
 
 Fetch the current I/O statistics for the block device given by C<$path>.
-The returned hash contains keys for
+The returned hash reference contains keys for
 
 =over 4
 
@@ -581,9 +601,11 @@ Some kind of error count
 
 =back
 
-=item my %params = $dom->get_scheduler_parameters($flags=0)
+=item my $params = $dom->get_scheduler_parameters($flags=0)
 
-Return the set of scheduler tunable parameters for the guest.
+Return the set of scheduler tunable parameters for the guest,
+as a hash reference. The precise set of keys in the hash
+are specific to the hypervisor.
 
 =item $dom->set_scheduler_parameters($params, $flags=0)
 
@@ -595,27 +617,35 @@ call
 
 Return a hash reference containing the set of memory tunable
 parameters for the guest. The keys in the hash are one of the
-constants MEMORY PARAMETERS described later.
+constants MEMORY PARAMETERS described later. The C<$flags>
+parameter accepts one or more the CONFIG OPTION constants
+documented later, and defaults to 0 if omitted.
 
 =item $dom->set_memory_parameters($params, $flags=0)
 
 Update the memory tunable parameters for the guest. The
 C<$params> should be a hash reference whose keys are one
-of the MEMORY PARAMETERS constants.
+of the MEMORY PARAMETERS constants. The C<$flags>
+parameter accepts one or more the CONFIG OPTION constants
+documented later, and defaults to 0 if omitted.
 
 =item my $params = $dom->get_blkio_parameters($flags=0)
 
 Return a hash reference containing the set of blkio tunable
 parameters for the guest. The keys in the hash are one of the
-constants BLKIO PARAMETERS described later.
+constants BLKIO PARAMETERS described later. The C<$flags>
+parameter accepts one or more the CONFIG OPTION constants
+documented later, and defaults to 0 if omitted.
 
 =item $dom->set_blkio_parameters($params, $flags=0)
 
 Update the blkio tunable parameters for the guest. The
 C<$params> should be a hash reference whose keys are one
-of the BLKIO PARAMETERS constants.
+of the BLKIO PARAMETERS constants. The C<$flags>
+parameter accepts one or more the CONFIG OPTION constants
+documented later, and defaults to 0 if omitted.
 
-=item %stats = $dom->get_block_iotune($disk, $flags=0)
+=item $stats = $dom->get_block_iotune($disk, $flags=0)
 
 Return a hash reference containing the set of blkio tunable
 parameters for the guest disk C<$disk>. The keys in the hash
@@ -643,27 +673,32 @@ of the INTERFACE PARAMETERS constants.
 
 Return a hash reference containing the set of numa tunable
 parameters for the guest. The keys in the hash are one of the
-constants NUMA PARAMETERS described later.
+constants NUMA PARAMETERS described later. The C<$flags>
+parameter accepts one or more the CONFIG OPTION constants
+documented later, and defaults to 0 if omitted.
 
 =item $dom->set_numa_parameters($params, $flags=0)
 
 Update the numa tunable parameters for the guest. The
 C<$params> should be a hash reference whose keys are one
-of the NUMA PARAMETERS constants.
+of the NUMA PARAMETERS constants. The C<$flags>
+parameter accepts one or more the CONFIG OPTION constants
+documented later, and defaults to 0 if omitted.
 
 =item $dom->block_resize($disk, $newsize, $flags=0)
 
-Resize the disk C<$disk> to have new size C<$newsize>. If the disk
+Resize the disk C<$disk> to have new size C<$newsize> KB. If the disk
 is backed by a special image format, the actual resize is done by the
 hypervisor. If the disk is backed by a raw file, or block device,
 the resize must be done prior to invoking this API call, and it
-merely updates the hypervisor's view of the disk size.
+merely updates the hypervisor's view of the disk size. The following
+flags may be used
 
 =over 4
 
-=item C<weight>
+=item Sys::Virt::Domain::BLOCK_RESIZE_BYTES
 
-Relative I/O weighting
+Treat C<$newsize> as if it were in bytes, rather than KB.
 
 =back
 
@@ -742,12 +777,20 @@ Total memory seen by guest
 
 =back
 
-=item %info = $dom->get_security_label()
+=item $info = $dom->get_security_label()
 
 Fetch information about the security label assigned to the guest
-domain. The returned hash has two keys, C<model> gives the name
-of the security model in effect (eg C<selinux>), while C<label>
-provides the name of the security label applied to the domain.
+domain. The returned hash reference has two keys, C<model> gives
+the name of the security model in effect (eg C<selinux>), while
+C<label> provides the name of the security label applied to the
+domain. This method only returns information about the first
+security label. To retrieve all labels, use C<get_security_label_list>.
+
+=item @info = $dom->get_security_label_list()
+
+Fetches information about all security labels assigned to the
+guest domain. The elements in the returned array are all
+hash references, whose keys are as described for C<get_security_label>.
 
 =item $ddom = $dom->migrate(destcon, flags, dname, uri, bandwidth)
 
@@ -812,13 +855,13 @@ The C<$flags> parameter is currently unused and defaults to zero.
 =item $dom->migrate_set_max_speed($bandwidth, $flags)
 
 Set the maximum allowed bandwidth during migration of the guest.
-The C<bandwidth> parameter is measured in kilobytes/second.
+The C<bandwidth> parameter is measured in MB/second.
 The C<$flags> parameter is currently unused and defaults to zero.
 
 =item $bandwidth = $dom->migrate_get_max_speed($flag)
 
 Get the maximum allowed bandwidth during migration fo the guest.
-The returned <bandwidth> value is measured in kilobytes/second.
+The returned <bandwidth> value is measured in MB/second.
 The C<$flags> parameter is currently unused and defaults to zero.
 
 =item $dom->inject_nmi($flags)
@@ -861,13 +904,29 @@ vCPU is currently scheduled, C<cpuTime> the cummulative execution
 time of the vCPU, C<state> the running state and C<affinity> giving
 the allowed shedular placement. The value for C<affinity> is a
 string representing a bitmask against physical CPUs, 8 cpus per
-character.
+character. To extract the bits use the C<unpack> function with
+the C<b*> template.
 
 =item $dom->pin_vcpu($vcpu, $mask)
 
-Ping the virtual CPU given by index C<$vcpu> to physical CPUs
+Pin the virtual CPU given by index C<$vcpu> to physical CPUs
 given by C<$mask>. The C<$mask> is a string representing a bitmask
 against physical CPUs, 8 cpus per character.
+
+=item $mask = $dom->get_emulator_pin_info()
+
+Obtain information about the CPU affinity of the emulator process.
+The returned C<$mask> is a bitstring against physical CPUs, 8 cpus
+per character. To extract the bits use the C<unpack> function with
+the C<b*> template.
+
+=item $dom->pin_emulator($newmask, $flags=0)
+
+Pin the emulator threads to the physical CPUs identified by the
+affinity in C<$newmask>. The C<$newmask> is a bitstring against
+the physical CPUa, 8 cpus per character. To create a suitable
+bitstring, use the C<vec> function with a value of C<1> for the
+C<BITS> parameter.
 
 =item my @stats = $dom->get_cpu_stats($startCpu, $numCpus, $flags=0)
 
@@ -896,7 +955,7 @@ qualified path of the block device being changed.
 
 Change the maximum I/O bandwidth used by the block job that
 is currently executing for C<$path>. The C<$bandwidth> argument
-is specified in KB/s
+is specified in MB/s
 
 =item $dom->abort_block_job($path, $flags=0)
 
@@ -907,13 +966,20 @@ associated with C<$path>
 
 Merge the backing files associated with C<$path> into the
 top level file. The C<$bandwidth> parameter specifies the
-maximum I/O rate to allow in KB/s.
+maximum I/O rate to allow in MB/s.
 
-=item $dom->block_rebase($path, $backingpath, $bandwith, $flags=0)
+=item $dom->block_rebase($path, $base, $bandwith, $flags=0)
 
 Switch the backing path associated with C<$path> to instead
-use C<$backingpath>. The C<$bandwidth> parameter specifies the
-maximum I/O rate to allow in KB/s.
+use C<$base>. The C<$bandwidth> parameter specifies the
+maximum I/O rate to allow in MB/s.
+
+=item $dom->block_commit($path, $base, $top, $bandwith, $flags=0)
+
+Commit changes there were made to the temporary top level file C<$top>.
+Takes all the differences between C<$top> and C<$base> and merge them
+into C<$base>. The C<$bandwidth> parameter specifies the
+maximum I/O rate to allow in MB/s.
 
 =item $count = $dom->num_of_snapshots()
 
@@ -928,6 +994,8 @@ used with the C<lookup_snapshot_by_name>
 
 Return a list of all snapshots currently known to the domain. The elements
 in the returned list are instances of the L<Sys::Virt::DomainSnapshot> class.
+This method requires O(n) RPC calls, so the C<list_all_snapshots> method is
+recommended as a more efficient alternative.
 
 =cut
 
@@ -950,6 +1018,14 @@ sub list_snapshots {
     return @snapshots;
 }
 
+
+
+=item my @snapshots = $dom->list_all_snapshots($flags)
+
+Return a list of all domain snapshots associated with this domain.
+The elements in the returned list are instances of the
+L<Sys::Virt::DomainSnapshot> class. The C<$flags> parameter can be
+used to filter the list of return domain snapshots.
 
 =item my $snapshot = $dom->get_snapshot_by_name($name)
 
@@ -1091,6 +1167,10 @@ The domain is inactive, and shut down.
 =item Sys::Virt::Domain::STATE_CRASHED
 
 The domain is inactive, and crashed.
+
+=item Sys::Virt::Domain::STATE_PMSUSPENDED
+
+The domain is active, but in power management suspend state
 
 =back
 
@@ -1250,6 +1330,25 @@ Skip authentication of the client
 
 =back
 
+
+=head2 OPEN CONSOLE CONSTANTS
+
+The following constants are used when opening a connection
+to the guest console
+
+=over 4
+
+=item Sys::Virt::Domain::OPEN_CONSOLE_FORCE
+
+Force opening of the console, disconnecting any other
+open session
+
+=item Sys::Virt::Domain::OPEN_CONSOLE_SAFE
+
+Check if the console driver supports safe operations
+
+=back
+
 =head2 XML DUMP OPTIONS
 
 The following constants are used to control the information
@@ -1397,6 +1496,11 @@ during migration
 Do not allow changes to the virtual domain configuration while
 migration is taking place. This option is automatically implied
 if doing a peer-2-peer migration.
+
+=item Sys::Virt::Domain::MIGRATE_UNSAFE
+
+Migrate even if the compatibility check indicates the migration
+will be unsafe to the guest.
 
 =back
 
@@ -1733,6 +1837,10 @@ The domain was restored from saved state file
 
 The domain was restored from a snapshot
 
+=item Sys::Virt::Domain::EVENT_STARTED_WAKEUP
+
+The domain was woken up from suspend
+
 =back
 
 =item Sys::Virt::Domain::EVENT_STOPPED
@@ -1832,6 +1940,18 @@ removed by administrator.
 
 =back
 
+=item Sys::Virt::Domain::EVENT_PMSUSPENDED
+
+The domain has stopped running
+
+=over 4
+
+=item Sys::Virt::Domain::EVENT_PMSUSPENDED_MEMORY
+
+The domain has suspend to RAM.
+
+=back
+
 =back
 
 =head2 EVENT ID CONSTANTS
@@ -1877,6 +1997,22 @@ Completion status of asynchronous block jobs
 =item Sys::Virt::Domain::EVENT_ID_DISK_CHANGE
 
 Changes in disk media
+
+=item Sys::Virt::Domain::EVENT_ID_TRAY_CHANGE
+
+CDROM media tray state
+
+=item Sys::Virt::Domain::EVENT_ID_PMSUSPEND
+
+Power management initiated suspend
+
+=item Sys::Virt::Domain::EVENT_ID_PMWAKEUP
+
+Power management initiated wakeup
+
+=item Sys::Virt::Domain::EVENT_ID_BALLOON_CHANGE
+
+Balloon target changes
 
 =back
 
@@ -1986,6 +2122,22 @@ The disk media was missing when attempting to start the guest
 
 =back
 
+=head2 TRAY CHANGE CONSTANTS
+
+These constants describe the reason for a tray change event
+
+=over 4
+
+=item Sys::Virt::Domain::EVENT_TRAY_CHANGE_CLOSE
+
+The tray was closed
+
+=item Sys::Virt::Domain::EVENT_TRAY_CHANGE_OPEN
+
+The tray was opened
+
+=back
+
 =head2 DOMAIN BLOCK JOB TYPE CONSTANTS
 
 The following constants identify the different types of domain
@@ -2000,6 +2152,14 @@ An unknown block job type
 =item Sys::Virt::Domain::BLOCK_JOB_TYPE_PULL
 
 The block pull job type
+
+=item Sys::Virt::Domain::BLOCK_JOB_TYPE_COPY
+
+The block copy job type
+
+=item Sys::Virt::Domain::BLOCK_JOB_TYPE_COMMIT
+
+The block commit job type
 
 =back
 
@@ -2017,6 +2177,66 @@ A successfully completed block job
 =item Sys::Virt::Domain::BLOCK_JOB_FAILED
 
 An unsuccessful block job
+
+=item Sys::Virt::Domain::BLOCK_JOB_CANCELED
+
+A block job canceled byy the user
+
+=back
+
+=head2 DOMAIN BLOCK REBASE CONSTANTS
+
+The following constants are useful when rebasing block devices
+
+=over 4
+
+=item Sys::Virt::Domain::BLOCK_REBASE_SHALLOW
+
+Limit copy to top of source backing chain
+
+=item Sys::Virt::Domain::BLOCK_REBASE_REUSE_EXT
+
+Reuse existing external file for copy
+
+=item Sys::Virt::Domain::BLOCK_REBASE_COPY_RAW
+
+Make destination file raw
+
+=item Sys::Virt::Domain::BLOCK_REBASE_COPY
+
+Start a copy job
+
+=back
+
+=head2 DOMAIN BLOCK JOB ABORT CONSTANTS
+
+The following constants are useful when aborting job copy jobs
+
+=over 4
+
+=item Sys::Virt::Domain::BLOCK_JOB_ABORT_ASYNC
+
+Request only, do not wait for completion
+
+=item Sys::Virt::Domain::BLOCK_JOB_ABORT_PIVOT
+
+Pivot to mirror when ending a copy job
+
+=back
+
+=head2 DOMAIN BLOCK COMMIT JOB CONSTANTS
+
+The following constants are useful with block commit job types
+
+=over 4
+
+=item Sys::Virt::Domain::BLOCK_COMMIT_DELETE
+
+Delete any files that are invalid after commit
+
+=item Sys::Virt::Domain::BLOCK_COMMIT_SHALLOW
+
+NULL base means next backing file, not whole chain
 
 =back
 
@@ -2065,6 +2285,11 @@ Do not use OS I/O cache when writing core dump
 =item Sys::Virt::Domain::DUMP_RESET
 
 Reset the virtual machine after finishing the dump
+
+=item Sys::Virt::Domain::DUMP_MEMORY_ONLY
+
+Only include guest RAM in the dump, not the device
+state
 
 =back
 
@@ -2204,6 +2429,172 @@ Available memory
 =item Sys::Virt::Domain::MEMORY_STAT_ACTUAL_BALLOON
 
 Actual balloon limit
+
+=back
+
+=head2 DOMAIN LIST CONSTANTS
+
+The following constants can be used when listing domains
+
+=over 4
+
+=item Sys::Virt::Domain::LIST_ACTIVE
+
+Only list domains that are currently active (running, or paused)
+
+=item Sys::Virt::Domain::LIST_AUTOSTART
+
+Only list domains that are set to automatically start on boot
+
+=item Sys::Virt::Domain::LIST_HAS_SNAPSHOT
+
+Only list domains that have a stored snapshot
+
+=item Sys::Virt::Domain::LIST_INACTIVE
+
+Only list domains that are currently inactive (shutoff, saved)
+
+=item Sys::Virt::Domain::LIST_MANAGEDSAVE
+
+Only list domains that have current managed save state
+
+=item Sys::Virt::Domain::LIST_NO_AUTOSTART
+
+Only list domains that are not set to automatically start on boto
+
+=item Sys::Virt::Domain::LIST_NO_MANAGEDSAVE
+
+Only list domains that do not have any managed save state
+
+=item Sys::Virt::Domain::LIST_NO_SNAPSHOT
+
+Only list domains that do not have a stored snapshot
+
+=item Sys::Virt::Domain::LIST_OTHER
+
+Only list domains that are not running, paused or shutoff
+
+=item Sys::Virt::Domain::LIST_PAUSED
+
+Only list domains that are paused
+
+=item Sys::Virt::Domain::LIST_PERSISTENT
+
+Only list domains which have a persistent config
+
+=item Sys::Virt::Domain::LIST_RUNNING
+
+Only list domains that are currently running
+
+=item Sys::Virt::Domain::LIST_SHUTOFF
+
+Only list domains that are currently shutoff
+
+=item Sys::Virt::Domain::LIST_TRANSIENT
+
+Only list domains that do not have a persistent config
+
+=back
+
+=head2 SEND KEY CONSTANTS
+
+The following constants are to be used with the C<send_key>
+API
+
+=over 4
+
+=item Sys::Virt::Domain::SEND_KEY_MAX_KEYS
+
+The maximum number of keys that can be sent in a single
+call to C<send_key>
+
+=back
+
+=head2 BLOCK STATS CONSTANTS
+
+The following constants provide the names of well known
+block stats fields
+
+=over 4
+
+=item Sys::Virt::Domain::BLOCK_STATS_ERRS
+
+The number of I/O errors
+
+=item Sys::Virt::Domain::BLOCK_STATS_FLUSH_REQ
+
+The number of flush requests
+
+=item Sys::Virt::Domain::BLOCK_STATS_FLUSH_TOTAL_TIMES
+
+The time spent processing flush requests
+
+=item Sys::Virt::Domain::BLOCK_STATS_READ_BYTES
+
+The amount of data read
+
+=item Sys::Virt::Domain::BLOCK_STATS_READ_REQ
+
+The number of read requests
+
+=item Sys::Virt::Domain::BLOCK_STATS_READ_TOTAL_TIMES
+
+The time spent processing read requests
+
+=item Sys::Virt::Domain::BLOCK_STATS_WRITE_BYTES
+
+The amount of data written
+
+=item Sys::Virt::Domain::BLOCK_STATS_WRITE_REQ
+
+The number of write requests
+
+=item Sys::Virt::Domain::BLOCK_STATS_WRITE_TOTAL_TIMES
+
+The time spent processing write requests
+
+=back
+
+=head2 CPU STATS CONSTANTS
+
+The following constants provide the names of well known
+cpu stats fields
+
+=over 4
+
+=item Sys::Virt::Domain::CPU_STATS_CPUTIME
+
+The total CPU time, including both hypervisor and
+vCPU time.
+
+=item Sys::Virt::Domain::CPU_STATS_USERTIME
+
+THe total time in kernel
+
+=item Sys::Virt::Domain::CPU_STATS_SYSTEMTIME
+
+The total time in userspace
+
+=item Sys::Virt::Domain::CPU_STATS_VCPUTIME
+
+The total vCPU time.
+
+=back
+
+=head2 CPU STATS CONSTANTS
+
+The following constants provide the names of well known
+schedular parameters
+
+=over 4
+
+=item Sys::Virt::SCHEDULER_EMULATOR_PERIOD
+
+The duration of the time period for scheduling the emulator
+
+=item Sys::Virt::SCHEDULER_EMULATOR_QUOTA
+
+The quota for the emulator in one schedular time period
 
 =back
 
