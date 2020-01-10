@@ -1,0 +1,86 @@
+Sys::Virt ChangeLog
+===================
+
+New in 0.2.5:
+
+ - Add all APIs + constants from 0.8.2, 0.8.5 and 0.8.7
+   releases, with exception of virDomainOpenConsole
+ - Add missing dep on XML::XPath
+ - Requires libvirt >= 0.8.7
+
+New in 0.2.4:
+
+ - Add all APIs + constants from 0.7.7, 0.8.0 & 0.8.1 releases
+ - Requires libvirt >= 0.8.1
+
+New in 0.2.3:
+
+ - New virSecretPtr APIs
+ - Fix authentication callback handling of NULLs
+ - Document flags parameters to many methods
+ - Add virDomainMigrateToURI and virConnectGetLibVersion
+ - Add virConnectCPUCompare and virDomainMemoryStats
+ - Add vir*IsActive vir*IsPersistent
+ - Add virConnectIsSecure & virConnectIsEncrypted
+ - Add new error codes
+ - Require libvirt >= 0.7.5
+
+New in 0.2.2:
+
+ - Add all new APIs upto libvirt 0.7.0 APIs (listing defined
+   network interfaces)
+ - Add missing APIs for looking up storage volumes based
+   on path and key
+ - Fix lookup of network interfaces based on MAC address
+ - Add missing APIs for defining network interfaces and
+   starting defined interfaces
+
+New in 0.2.1:
+
+ - Add all new APIs upto libvirt 0.6.4 (network interfaces,
+   storage volume cloning and node device create/delete)
+ - Fix off-by-1 in UUID stringification
+ - Set default values for optional params.
+ - Use SvOK check for potentially undefined string params
+ - Export all the virError related constants
+ - Fix some memory leaks in C layer
+ - Remove bogus module imports from test suite
+
+New in 0.2.0:
+
+ - Implement storage, node device, event APIs
+ - Full covereage of all APIs in 0.6.1 release of libvirt
+ - Full documentation coverage
+ - Ability to authenticate when openning connections
+
+New in 0.1.2:
+
+ - Added manual written META.yml
+ - Added networking APIs
+ - Added APIs for host capabilities
+ - Added APIs for inactive domains
+ - Switch licensse to GPLv2+ or Artistic for CPAN compatability
+ - Fix return values for reboot/shutdown/undefine/create APIs
+ - Expanded documentation coverage
+
+New in 0.1.1:
+
+ - Fixed POD documentation names
+ - Make Sys::Virt::Error use 'strict' and 'warnings' pragmas
+ - Remove duplicated DESTROY sub in Domain.pm since its already
+   provided in the XS backend
+ - Fixed typo in Makefile.PL
+ - Allow connection URI to be passed to example programs
+ - Minimum required libvirt version is now 0.1.1
+ - Make Makefile.PL exit if minimum required libvirt is not
+   found by pkg-config
+ - Added bindings for newly introduced APIs in libvirt 0.1.1
+
+New in 0.1.0:
+
+ - Added Sys::Virt->get_node_info mapping to virNodeGetInfo
+ - Exposed the constants for domain state in Sys::Virt::Domain
+ - Added binding for virDomainReboot
+ - Change get_uuid to return raw UUID string
+ - Add get_uuid_string to return a printable version
+ - More example programs
