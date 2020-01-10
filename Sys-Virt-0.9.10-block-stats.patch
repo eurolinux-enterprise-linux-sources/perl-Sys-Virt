@@ -1,0 +1,24 @@
+commit 69c27b2ab2b7dd9e96a8d84b97c5cb3395394346
+Author: Guannan Ren <gren@redhat.com>
+Date:   Wed Feb 22 18:40:27 2012 +0000
+
+    de-mortalize the return value from hv_delete
+    
+    when calling block_stats() like $dom->block_stats(), it will report errors:
+    
+    Attempt to free unreferenced scalar: SV 0x2598498, Perl interpreter: 0x11a0010.
+    Attempt to free unreferenced scalar: SV 0x258c498, Perl interpreter: 0x11a0010.
+    This patch fix it.
+
+diff --git a/Virt.xs b/Virt.xs
+index e5d8438..9ef9715 100644
+--- a/Virt.xs
++++ b/Virt.xs
+@@ -3358,6 +3358,7 @@ block_stats(dom, path, flags=0)
+                   field = "flush_reqs";
+               if (field) {
+                   SV *val = hv_delete(RETVAL, params[i].field, strlen(params[i].field), 0);
++                  SvREFCNT_inc(val);
+                   (void)hv_store(RETVAL, field, strlen(field), val, 0);
+               }
+           }

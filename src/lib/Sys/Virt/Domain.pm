@@ -95,6 +95,22 @@ Returns a printable string representation of the raw UUID, in the format
 
 Returns a string with a locally unique name of the domain
 
+=item my $str = $dom->get_metadata($type, $uri, $flags =0)
+
+Returns the metadata element of type C<$type> associated
+with the domain. If C<$type> is C<Sys::Virt::Domain::METADATA_ELEMENT>
+then the C<$uri> parameter specifies the XML namespace to
+retrieve, otherwise C<$uri> should be C<undef>. The optional
+C<$flags> parameter defaults to zero.
+
+=item $dom->set_metadata($type, $val, $key, $uri, $flags=0)
+
+Sets the metadata element of type C<$type> to hold the value
+C<$val>. If C<$type> is  C<Sys::Virt::Domain::METADATA_ELEMENT>
+then the C<$key> and C<$uri> elements specify an XML namespace
+to use, otherwise they should both be C<nudef>. The optional
+C<$flags> parameter defaults to zero.
+
 =item $dom->is_active()
 
 Returns a true value if the domain is currently running
@@ -110,10 +126,13 @@ Returns a true value if the domain is running and has a persistent
 configuration file defined that is out of date compared to the
 current live config.
 
-=item my $xml = $dom->get_xml_description()
+=item my $xml = $dom->get_xml_description($flags=0)
 
 Returns an XML document containing a complete description of
-the domain's configuration
+the domain's configuration. The optional $flags parameter
+controls generation of the XML document, defaulting to 0 if
+omitted. It can be one or more of the XML DUMP constants
+listed later in this document.
 
 =item my $type = $dom->get_os_type()
 
@@ -143,6 +162,15 @@ by calling the C<resume> method.
 
 Resume execution of a domain previously halted with the C<suspend>
 method.
+
+=item $dom->pm_suspend_for_duration($target, $duration, $flags=0)
+
+Tells the guest OS to enter the power management suspend state
+identified by C<$target>. The C<$target> parameter should be
+one of the NODE SUSPEND CONTANTS listed in C<Sys::Virt>. The
+C<$duration> specifies when the guest should automatically
+wakeup. The C<$flags> parameter is optional and defaults to
+zero.
 
 =item $dom->save($filename)
 
@@ -179,9 +207,9 @@ omitted will default to 0.
 
 =item $dom->destroy()
 
-Immediately terminate the machine, and remove it from the virtual
-machine monitor. The C<$dom> handle is invalid after this call
-completes and should not be used again.
+Immediately poweroff the machine. This is equivalent to removing the
+power plug. The guest OS is given no time to cleanup / save state.
+For a clean poweroff sequence, use the C<shutdown> method instead.
 
 =item my $info = $dom->get_info()
 
@@ -261,6 +289,10 @@ The guest is paused at admin request
 =item Sys::Virt::Domain::STATE_PAUSED_WATCHDOG
 
 The guest is paused due to the watchdog
+
+=item Sys::Virt::Domain::STATE_PAUSED_SHUTTING_DOWN
+
+The guest is paused while domain shutdown takes place
 
 =item Sys::Virt::Domain::STATE_RUNNING_BOOTED
 
@@ -359,6 +391,25 @@ the current state.
 
 =back
 
+=item my @errs = $dom->get_disk_errors($flags=0)
+
+Returns a list of all disk errors that have occurred on
+the backing store for the guest's virtual disks. The
+returned array elements are hash references, containing
+two keys
+
+=over 4
+
+=item C<path>
+
+The path of the disk with an error
+
+=item C<error>
+
+The error type
+
+=back
+
 =item $dom->send_key($keycodeset, $holdtime, \@keycodes, $flags=0)
 
 Sends a sequence of keycodes to the guest domain. The
@@ -418,13 +469,23 @@ the current state.
 =item $dom->shutdown()
 
 Request that the guest OS perform a graceful shutdown and
-poweroff.
+poweroff. This usually requires some form of cooperation
+from the guest operating system, such as responding to an
+ACPI signal, or a guest agent process. For an immediate,
+forceful poweroff, use the C<destroy> method instead.
 
 =item $dom->reboot([$flags])
 
 Request that the guest OS perform a graceful shutdown and
 optionally restart. The optional C<$flags> parameter is
 currently unused and if omitted defaults to zero.
+
+=item $dom->reset([$flags])
+
+Perform a hardware reset of the virtual machine. The guest
+OS is given no opportunity to shutdown gracefully. The
+optional C<$flags> parameter is currently unused and if
+omitted defaults to zero.
 
 =item $dom->get_max_vcpus()
 
@@ -494,29 +555,7 @@ Return the scheduler type for the guest domain
 =item %stats = $dom->block_stats($path)
 
 Fetch the current I/O statistics for the block device given by C<$path>.
-The returned hash containins keys for
-
-=item my %params = $dom->get_scheduler_parameters()
-
-Return the set of scheduler tunable parameters for the guest.
-
-=item $dom->set_scheduler_parameters($params)
-
-Update the set of scheduler tunable parameters. The value names for
-tunables vary, and can be discovered using the C<get_scheduler_params>
-call
-
-=item my $params = $dom->get_memory_parameters()
-
-Return a hash reference containing the set of memory tunable
-parameters for the guest. The keys in the hash are one of the
-constants MEMORY PARAMETERS described later.
-
-=item $dom->set_memory_parameters($params)
-
-Update the memory tunable parameters for the guest. The
-C<$params> should be a hash reference whose keys are one
-of the MEMORY PARAMETERS constants.
+The returned hash contains keys for
 
 =over 4
 
@@ -542,17 +581,83 @@ Some kind of error count
 
 =back
 
-=item my $params = $dom->get_blkio_parameters()
+=item my %params = $dom->get_scheduler_parameters($flags=0)
+
+Return the set of scheduler tunable parameters for the guest.
+
+=item $dom->set_scheduler_parameters($params, $flags=0)
+
+Update the set of scheduler tunable parameters. The value names for
+tunables vary, and can be discovered using the C<get_scheduler_params>
+call
+
+=item my $params = $dom->get_memory_parameters($flags=0)
+
+Return a hash reference containing the set of memory tunable
+parameters for the guest. The keys in the hash are one of the
+constants MEMORY PARAMETERS described later.
+
+=item $dom->set_memory_parameters($params, $flags=0)
+
+Update the memory tunable parameters for the guest. The
+C<$params> should be a hash reference whose keys are one
+of the MEMORY PARAMETERS constants.
+
+=item my $params = $dom->get_blkio_parameters($flags=0)
 
 Return a hash reference containing the set of blkio tunable
 parameters for the guest. The keys in the hash are one of the
 constants BLKIO PARAMETERS described later.
 
-=item $dom->set_blkio_parameters($params)
+=item $dom->set_blkio_parameters($params, $flags=0)
 
 Update the blkio tunable parameters for the guest. The
 C<$params> should be a hash reference whose keys are one
 of the BLKIO PARAMETERS constants.
+
+=item %stats = $dom->get_block_iotune($disk, $flags=0)
+
+Return a hash reference containing the set of blkio tunable
+parameters for the guest disk C<$disk>. The keys in the hash
+are one of the constants BLOCK IOTUNE PARAMETERS described later.
+
+=item $dom->set_block_iotune($disk, $params, $flags=0);
+
+Update the blkio tunable parameters for the guest disk C<$disk>. The
+C<$params> should be a hash reference whose keys are one
+of the BLOCK IOTUNE PARAMETERS constants.
+
+=item my $params = $dom->get_interface_parameters($intf, $flags=0)
+
+Return a hash reference containing the set of interface tunable
+parameters for the guest. The keys in the hash are one of the
+constants INTERFACE PARAMETERS described later.
+
+=item $dom->set_interface_parameters($intf, $params, $flags=0)
+
+Update the interface tunable parameters for the guest. The
+C<$params> should be a hash reference whose keys are one
+of the INTERFACE PARAMETERS constants.
+
+=item my $params = $dom->get_numa_parameters($flags=0)
+
+Return a hash reference containing the set of numa tunable
+parameters for the guest. The keys in the hash are one of the
+constants NUMA PARAMETERS described later.
+
+=item $dom->set_numa_parameters($params, $flags=0)
+
+Update the numa tunable parameters for the guest. The
+C<$params> should be a hash reference whose keys are one
+of the NUMA PARAMETERS constants.
+
+=item $dom->block_resize($disk, $newsize, $flags=0)
+
+Resize the disk C<$disk> to have new size C<$newsize>. If the disk
+is backed by a special image format, the actual resize is done by the
+hypervisor. If the disk is backed by a raw file, or block device,
+the resize must be done prior to invoking this API call, and it
+merely updates the hypervisor's view of the disk size.
 
 =over 4
 
@@ -710,10 +815,33 @@ Set the maximum allowed bandwidth during migration of the guest.
 The C<bandwidth> parameter is measured in kilobytes/second.
 The C<$flags> parameter is currently unused and defaults to zero.
 
+=item $bandwidth = $dom->migrate_get_max_speed($flag)
+
+Get the maximum allowed bandwidth during migration fo the guest.
+The returned <bandwidth> value is measured in kilobytes/second.
+The C<$flags> parameter is currently unused and defaults to zero.
+
 =item $dom->inject_nmi($flags)
 
 Trigger an NMI in the guest virtual machine. The C<$flags> parameter
 is currently unused and defaults to 0.
+
+=item $dom->open_console($st, $devname, $flags)
+
+Open the text console for a serial, parallel or paravirt console
+device identified by C<$devname>, connecting it to the stream
+C<$st>. If C<$devname> is undefined, the default console will be
+opened. C<$st> must be a C<Sys::Virt::Stream> object used for
+bi-directional communication with the console. C<$flags> is
+currently unused, defaulting to 0.
+
+=item $dom->open_graphics($idx, $fd, $flags)
+
+Open the graphics console for a guest, identified by C<$idx>,
+counting from 0. The C<$fd> should be a file descriptor for an
+anoymous socket pair. The C<$flags> argument should be one of
+the constants listed at the end of this document, and defaults
+to 0.
 
 =item $dom->screenshot($st, $screen, $flags)
 
@@ -740,6 +868,14 @@ character.
 Ping the virtual CPU given by index C<$vcpu> to physical CPUs
 given by C<$mask>. The C<$mask> is a string representing a bitmask
 against physical CPUs, 8 cpus per character.
+
+=item my @stats = $dom->get_cpu_stats($startCpu, $numCpus, $flags=0)
+
+Requests the guests host physical CPU usage statistics, starting
+from host CPU <$startCpu> counting upto C<$numCpus>. If C<$startCpu>
+is -1 and C<$numCpus> is 1, then the utilization across all CPUs
+is returned. Returns an array of hash references, each element
+containing stats for one CPU.
 
 =item my $info = $dom->get_job_info()
 
@@ -773,6 +909,12 @@ Merge the backing files associated with C<$path> into the
 top level file. The C<$bandwidth> parameter specifies the
 maximum I/O rate to allow in KB/s.
 
+=item $dom->block_rebase($path, $backingpath, $bandwith, $flags=0)
+
+Switch the backing path associated with C<$path> to instead
+use C<$backingpath>. The C<$bandwidth> parameter specifies the
+maximum I/O rate to allow in KB/s.
+
 =item $count = $dom->num_of_snapshots()
 
 Return the number of saved snapshots of the domain
@@ -799,7 +941,7 @@ sub list_snapshots {
     my @snapshots;
     foreach my $name (@names) {
 	eval {
-	    push @snapshots, Sys::Virt::Domain->_new(connection => $self, name => $name);
+	    push @snapshots, Sys::Virt::DomainSnapshot->_new(domain => $self, name => $name);
 	};
 	if ($@) {
 	    # nada - snapshot went away before we could look it up
@@ -809,6 +951,20 @@ sub list_snapshots {
 }
 
 
+=item my $snapshot = $dom->get_snapshot_by_name($name)
+
+Return the domain snapshot with a name of C<$name>. The returned object is
+an instance of the L<Sys::Virt::DomainSnapshot> class.
+
+=cut
+
+sub get_snapshot_by_name {
+    my $self = shift;
+    my $name = shift;
+
+    return Sys::Virt::DomainSnapshot->_new(domain => $self, name => $name);
+}
+
 =item $dom->has_current_snapshot()
 
 Returns a true value if the domain has a currently active snapshot
@@ -816,6 +972,22 @@ Returns a true value if the domain has a currently active snapshot
 =item $snapshot = $dom->current_snapshot()
 
 Returns the currently active snapshot for the domain.
+
+=item $snapshot = $dom->create_snapshot($xml[, $flags])
+
+Create a new snapshot from the C<$xml>.
+
+=cut
+
+sub create_snapshot {
+    my $self = shift;
+    my $xml = shift;
+    my $flags = shift;
+
+    my $snapshot = Sys::Virt::DomainSnapshot->_new(domain => $self, xml => $xml, flags => $flags);
+
+    return $snapshot;
+}
 
 =over 4
 
@@ -967,6 +1139,10 @@ Automatically destroy the guest when the connection is closed (or fails)
 
 Do not use OS I/O cache if starting a domain with a saved state image
 
+=item Sys::Virt::Domain::START_FORCE_BOOT
+
+Boot the guest, even if there was a saved snapshot
+
 =back
 
 
@@ -1013,6 +1189,12 @@ The USB HID keycode set
 
 The Windows keycode set
 
+=item Sys::Virt::Domain::KEYCODE_SET_RFB
+
+The XT keycode set, with the extended scancodes using the
+high bit of the first byte, instead of the low bit of the
+second byte.
+
 =back
 
 =head2 MEMORY PEEK
@@ -1025,6 +1207,10 @@ method's flags parameter
 =item Sys::Virt::Domain::MEMORY_VIRTUAL
 
 Indicates that the offset is using virtual memory addressing.
+
+=item Sys::Virt::Domain::MEMORY_PHYSICAL
+
+Indicates that the offset is using physical memory addressing.
 
 =back
 
@@ -1051,6 +1237,19 @@ The virtual CPU is waiting to be scheduled
 =back
 
 
+=head2 OPEN GRAPHICS CONSTANTS
+
+The following constants are used when opening a connection
+to the guest graphics server
+
+=over 4
+
+=item Sys::Virt::Domain::OPEN_GRAPHICS_SKIPAUTH
+
+Skip authentication of the client
+
+=back
+
 =head2 XML DUMP OPTIONS
 
 The following constants are used to control the information
@@ -1067,6 +1266,11 @@ if it is currently running.
 
 Include security sensitive information in the XML dump, such as
 passwords.
+
+=item Sys::Virt::Domain::XML_UPDATE_CPU
+
+Update the CPU model definition to match the current executing
+state.
 
 =back
 
@@ -1088,6 +1292,10 @@ Modify only the live state of the domain
 =item Sys::Virt::Domain::DEVICE_MODIFY_CONFIG
 
 Modify only the persistent config of the domain
+
+=item Sys::Virt::Domain::DEVICE_MODIFY_FORCE
+
+Force the device to be modified
 
 =back
 
@@ -1204,6 +1412,11 @@ domain configurations
 Also remove any managed save image when undefining the virtual
 domain
 
+=item Sys::Virt::Domain::UNDEFINE_SNAPSHOTS_METADATA
+
+Also remove any snapshot metadata when undefining the virtual
+domain.
+
 =back
 
 =head2 JOB TYPES
@@ -1272,11 +1485,158 @@ The value of an unlimited memory parameter
 
 =head2 BLKIO PARAMETERS
 
+The following parameters control I/O tuning for the domain
+as a whole
+
 =over 4
 
 =item Sys::Virt::Domain::BLKIO_WEIGHT
 
 The I/O weight parameter
+
+=item Sys::Virt::Domain::BLKIO_DEVICE_WEIGHT
+
+The per-device I/O weight parameter
+
+=back
+
+=head2 BLKIO TUNING PARAMETERS
+
+The following parameters control I/O tuning for an individual
+guest disk.
+
+=over 4
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_TOTAL_BYTES_SEC
+
+The total bytes processed per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_READ_BYTES_SEC
+
+The bytes read per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_WRITE_BYTES_SEC
+
+The bytes written per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_TOTAL_IOPS_SEC
+
+The total I/O operations processed per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_READ_IOPS_SEC
+
+The I/O operations read per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_WRITE_IOPS_SEC
+
+The I/O operations written per second.
+
+=back
+
+=head2 SCHEDULER CONSTANTS
+
+=over 4
+
+=item Sys::Virt::Domain::SCHEDULER_CAP
+
+The VM cap tunable
+
+=item Sys::Virt::Domain::SCHEDULER_CPU_SHARES
+
+The CPU shares tunable
+
+=item Sys::Virt::Domain::SCHEDULER_LIMIT
+
+The VM limit tunable
+
+=item Sys::Virt::Domain::SCHEDULER_RESERVATION
+
+The VM reservation tunable
+
+=item Sys::Virt::Domain::SCHEDULER_SHARES
+
+The VM shares tunable
+
+=item Sys::Virt::Domain::SCHEDULER_VCPU_PERIOD
+
+The VCPU period tunable
+
+=item Sys::Virt::Domain::SCHEDULER_VCPU_QUOTA
+
+The VCPU quota tunable
+
+=item Sys::Virt::Domain::SCHEDULER_WEIGHT
+
+The VM weight tunable
+
+=back
+
+=head2 NUMA PARAMETERS
+
+The following constants are useful when getting/setting the
+guest NUMA memory policy
+
+=over 4
+
+=item Sys::Virt::Domain::NUMA_MODE
+
+The NUMA policy mode
+
+=item Sys::Virt::Domain::NUMA_NODESET
+
+The NUMA nodeset mask
+
+=back
+
+The following constants are useful when interpreting the
+C<Sys::Virt::Domain::NUMA_MODE> parameter value
+
+=over 4
+
+=item Sys::Virt::Domain::NUMATUNE_MEM_STRICT
+
+Allocation is mandatory from the mask nodes
+
+=item Sys::Virt::Domain::NUMATUNE_MEM_PREFERRED
+
+Allocation is preferred from the masked nodes
+
+=item Sys::Virt::Domain::NUMATUNE_MEM_INTERLEAVE
+
+Allocation is interleaved across all masked nods
+
+=back
+
+=head2 INTERFACE PARAMETERS
+
+The following constants are useful when getting/setting the
+per network interface tunable parameters
+
+=over 4
+
+=item Sys::Virt::Domain::BANDWIDTH_IN_AVERAGE
+
+The average inbound bandwidth
+
+=item Sys::Virt::Domain::BANDWIDTH_IN_PEAK
+
+The peak inbound bandwidth
+
+=item Sys::Virt::Domain::BANDWIDTH_IN_BURST
+
+The burstable inbound bandwidth
+
+=item Sys::Virt::Domain::BANDWIDTH_OUT_AVERAGE
+
+The average outbound bandwidth
+
+=item Sys::Virt::Domain::BANDWIDTH_OUT_PEAK
+
+The peak outbound bandwidth
+
+=item Sys::Virt::Domain::BANDWIDTH_OUT_BURST
+
+The burstable outbound bandwidth
 
 =back
 
@@ -1298,6 +1658,10 @@ Flag to request the persistent config value
 =item Sys::Virt::Domain::VCPU_CURRENT
 
 Flag to request the current config value
+
+=item Sys::Virt::Domain::VCPU_MAXIMUM
+
+Flag to request adjustment of the maximum vCPU value
 
 =back
 
@@ -1341,6 +1705,10 @@ emitted on the destination host.
 
 The domain resumed because the admin unpaused it.
 
+=item Sys::Virt::Domain::EVENT_RESUMED_FROM_SNAPSHOT
+
+The domain resumed because it was restored from a snapshot
+
 =back
 
 =item Sys::Virt::Domain::EVENT_STARTED
@@ -1360,6 +1728,10 @@ The domain started due to an incoming migration
 =item Sys::Virt::Domain::EVENT_STARTED_RESTORED
 
 The domain was restored from saved state file
+
+=item Sys::Virt::Domain::EVENT_STARTED_FROM_SNAPSHOT
+
+The domain was restored from a snapshot
 
 =back
 
@@ -1395,6 +1767,22 @@ The domain was saved to a state file
 
 The domain stopped due to graceful shutdown of the guest.
 
+=item Sys::Virt::Domain::EVENT_STOPPED_FROM_SNAPSHOT
+
+The domain was stopped due to a snapshot
+
+=back
+
+=item Sys::Virt::Domain::EVENT_SHUTDOWN
+
+The domain has shutdown but is not yet stopped
+
+=over 4
+
+=item Sys::Virt::Domain::EVENT_SHUTDOWN_FINISHED
+
+The domain finished shutting down
+
 =back
 
 =item Sys::Virt::Domain::EVENT_SUSPENDED
@@ -1411,6 +1799,23 @@ The domain has been suspended due to offline migration
 
 The domain has been suspended due to administrator pause
 request.
+
+=item Sys::Virt::Domain::EVENT_SUSPENDED_IOERROR
+
+The domain has been suspended due to a block device I/O
+error.
+
+=item Sys::Virt::Domain::EVENT_SUSPENDED_FROM_SNAPSHOT
+
+The domain has been suspended due to resume from snapshot
+
+=item Sys::Virt::Domain::EVENT_SUSPENDED_WATCHDOG
+
+The domain has been suspended due to the watchdog triggering
+
+=item Sys::Virt::Domain::EVENT_SUSPENDED_RESTORED
+
+The domain has been suspended due to restore from saved state
 
 =back
 
@@ -1468,6 +1873,10 @@ Errors from the virtualization control channel
 =item Sys::Virt::Domain::EVENT_ID_BLOCK_JOB
 
 Completion status of asynchronous block jobs
+
+=item Sys::Virt::Domain::EVENT_ID_DISK_CHANGE
+
+Changes in disk media
 
 =back
 
@@ -1559,6 +1968,22 @@ An IPv4 address
 
 An IPv6 address
 
+=item Sys::Virt::Domain::EVENT_GRAPHICS_ADDRESS_UNIX
+
+An UNIX socket path address
+
+=back
+
+=head2 DISK CHANGE EVENT CONSTANTS
+
+These constants describe the reason for a disk change event
+
+=over 4
+
+=item Sys::Virt::Domain::EVENT_DISK_CHANGE_MISSING_ON_START
+
+The disk media was missing when attempting to start the guest
+
 =back
 
 =head2 DOMAIN BLOCK JOB TYPE CONSTANTS
@@ -1606,6 +2031,16 @@ virtual machines
 
 Do not use OS I/O cache when saving state.
 
+=item Sys::Virt::Domain::SAVE_PAUSED
+
+Mark the saved state as paused to prevent the guest CPUs
+starting upon restore.
+
+=item Sys::Virt::Domain::SAVE_RUNNING
+
+Mark the saved state as running to allow the guest CPUs
+to start upon restore.
+
 =back
 
 =head2 DOMAIN CORE DUMP CONSTANTS
@@ -1626,6 +2061,149 @@ Crash the guest after completing the core dump
 =item Sys::Virt::Domain::DUMP_BYPASS_CACHE
 
 Do not use OS I/O cache when writing core dump
+
+=item Sys::Virt::Domain::DUMP_RESET
+
+Reset the virtual machine after finishing the dump
+
+=back
+
+=head2 DESTROY CONSTANTS
+
+The following constants are useful when terminating guests
+using the C<destroy> API.
+
+=over 4
+
+=item Sys::Virt::Domain::DESTROY_DEFAULT
+
+Destroy the guest using the default approach
+
+=item Sys::Virt::Domain::DESTROY_GRACEFUL
+
+Destroy the guest in a graceful manner
+
+=back
+
+=head2 SHUTDOWN CONSTANTS
+
+The following constants are useful when requesting that a
+guest terminate using the C<shutdown> API
+
+=over 4
+
+=item Sys::Virt::Domain::SHUTDOWN_DEFAULT
+
+Shutdown using the hypervisor's default mechanism
+
+=item Sys::Virt::Domain::SHUTDOWN_GUEST_AGENT
+
+Shutdown by issuing a command to a guest agent
+
+=item Sys::Virt::Domain::SHUTDOWN_ACPI_POWER_BTN
+
+Shutdown by injecting an ACPI power button press
+
+=back
+
+=head2 REBOOT CONSTANTS
+
+The following constants are useful when requesting that a
+guest terminate using the C<reboot> API
+
+=over 4
+
+=item Sys::Virt::Domain::REBOOT_DEFAULT
+
+Reboot using the hypervisor's default mechanism
+
+=item Sys::Virt::Domain::REBOOT_GUEST_AGENT
+
+Reboot by issuing a command to a guest agent
+
+=item Sys::Virt::Domain::REBOOT_ACPI_POWER_BTN
+
+Reboot by injecting an ACPI power button press
+
+=back
+
+=head2 METADATA CONSTANTS
+
+The following constants are useful when reading/writing
+metadata about a guest
+
+=over 4
+
+=item Sys::Virt::Domain::METADATA_TITLE
+
+The short human friendly title of the guest
+
+=item Sys::Virt::Domain::METADATA_DESCRIPTION
+
+The long free text description of the guest
+
+=item Sys::Virt::Domain::METADATA_ELEMENT
+
+The structured metadata elements for the guest
+
+=back
+
+=head2 DISK ERROR CONSTANTS
+
+The following constants are useful when interpreting
+disk error codes
+
+=over 4
+
+=item Sys::Virt::Domain::DISK_ERROR_NONE
+
+No error
+
+=item Sys::Virt::Domain::DISK_ERROR_NO_SPACE
+
+The host storage has run out of free space
+
+=item Sys::Virt::Domain::DISK_ERROR_UNSPEC
+
+An unspecified error has ocurred.
+
+=back
+
+=head2 MEMORY STATISTIC CONSTANTS
+
+=over 4
+
+=item Sys::Virt::Domain::MEMORY_STAT_SWAP_IN
+
+Swap in
+
+=item Sys::Virt::Domain::MEMORY_STAT_SWAP_OUT
+
+Swap out
+
+=item Sys::Virt::Domain::MEMORY_STAT_MINOR_FAULT
+
+Minor faults
+
+=item Sys::Virt::Domain::MEMORY_STAT_MAJOR_FAULT
+
+Major faults
+
+=item Sys::Virt::Domain::MEMORY_STAT_RSS
+
+Resident memory
+
+=item Sys::Virt::Domain::MEMORY_STAT_UNUSED
+
+Unused memory
+
+=item Sys::Virt::Domain::MEMORY_STAT_AVAILABLE
+
+Available memory
+
+=item Sys::Virt::Domain::MEMORY_STAT_ACTUAL_BALLOON
+
+Actual balloon limit
 
 =back
 

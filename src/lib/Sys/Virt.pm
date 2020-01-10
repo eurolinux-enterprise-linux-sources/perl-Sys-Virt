@@ -71,11 +71,11 @@ use Sys::Virt::NWFilter;
 use Sys::Virt::DomainSnapshot;
 use Sys::Virt::Stream;
 
-our $VERSION = '0.9.4';
+our $VERSION = '0.9.10';
 require XSLoader;
 XSLoader::load('Sys::Virt', $VERSION);
 
-=item my $vmm = Sys::Virt->new(uri => $uri, readonly => $ro);
+=item my $vmm = Sys::Virt->new(uri => $uri, readonly => $ro, flags => $flags);
 
 Attach to the virtual machine monitor with the address of C<address>. The
 uri parameter may be omitted, in which case the default connection made
@@ -172,7 +172,10 @@ sub new {
     my %params = @_;
 
     my $uri = exists $params{address} ? $params{address} : exists $params{uri} ? $params{uri} : undef;
-    my $readonly = exists $params{readonly} ? $params{readonly} : 0;
+    my $flags = exists $params{flags} ? $params{flags} : 0;
+    if ($params{readonly}) {
+	$flags |= &Sys::Virt::CONNECT_RO;
+    }
     my $auth = exists $params{auth} ? $params{auth} : 0;
 
     my $authcb = exists $params{callback} ? $params{callback} : undef;
@@ -181,9 +184,9 @@ sub new {
     my $self;
 
     if ($auth) {
-	$self = Sys::Virt::_open_auth($uri, $readonly, $credlist, $authcb);
+	$self = Sys::Virt::_open_auth($uri, $credlist, $authcb, $flags);
     } else {
-	$self = Sys::Virt::_open($uri, $readonly);
+	$self = Sys::Virt::_open($uri, $flags);
     }
 
     bless $self, $class;
@@ -1159,15 +1162,62 @@ or encryption with a TCP stream.
 Returns a true value if the current connection data stream is
 encrypted.
 
+=item $conn->is_alive()
+
+Returns a true value if the connection is alive, as determined
+by keep-alive packets or other recent RPC traffic.
+
+=item $conn->set_keep_alive($interval, $count)
+
+Change the operation of the keep alive protocol to send C<$count>
+packets spaced C<$interval> seconds apart before considering the
+connection dead.
+
 =item my $info = $con->get_node_info()
 
 Returns a hash reference summarising the capabilities of the host
 node. The elements of the hash are as follows:
 
+=over 4
+
+=item memory
+
+The amount of physical memory in the host
+
+=item model
+
+The model of the CPU, eg x86_64
+
+=item cpus
+
+The total number of logical CPUs
+
+=item mhz
+
+The peak MHZ of the CPU
+
+=item nodes
+
+The number of NUMA cells
+
+=item sockets
+
+The number of CPU sockets
+
+=item cores
+
+The number of cores per socket
+
+=item threads
+
+The number of threads per core
+
+=back
+
 =item my $info = $con->get_node_cpu_stats($cpuNum=-1, $flags=0)
 
 Returns a hash reference providing information about the host
-CPU statistics. If <$cpuNum> is omitted, it defaults to -1
+CPU statistics. If <$cpuNum> is omitted, it defaults to C<Sys::Virt::NODE_CPU_STATS_ALL_CPUS>
 which causes it to return cummulative information for all
 CPUs in the host. If C<$cpuNum> is zero or larger, it returns
 information just for the specified number. The C<$flags>
@@ -1201,7 +1251,7 @@ The overall percentage utilization.
 =item my $info = $con->get_node_memory_stats($cellNum=-1, $flags=0)
 
 Returns a hash reference providing information about the host
-memory statistics. If <$cellNum> is omitted, it defaults to -1
+memory statistics. If <$cellNum> is omitted, it defaults to C<Sys::Virt::NODE_MEMORY_STATS_ALL_CELLS>
 which causes it to return cummulative information for all
 NUMA cells in the host. If C<$cellNum> is zero or larger, it
 returns information just for the specified number. The C<$flags>
@@ -1227,6 +1277,12 @@ The memory consumed by buffers
 The memory consumed for cache
 
 =back
+
+=item $conn->node_suspend_for_duration($target, $duration, $flags=0)
+
+Suspend the the host, using mode C<$target> which is one of the NODE
+SUSPEND constants listed later. The C<$duration> parameter controls
+how long the node is suspended for before waking up.
 
 =item $conn->domain_event_register($callback)
 
@@ -1316,42 +1372,6 @@ compute the baseline CPU model that is operable across all hosts. The
 XML for the baseline CPU model is returned. The optional C<$flags>
 parameter is currently unused and defaults to 0.
 
-=over 4
-
-=item memory
-
-The amount of physical memory in the host
-
-=item model
-
-The model of the CPU, eg x86_64
-
-=item cpus
-
-The total number of logical CPUs
-
-=item mhz
-
-The peak MHZ of the CPU
-
-=item nodes
-
-The number of NUMA cells
-
-=item sockets
-
-The number of CPU sockets
-
-=item cores
-
-The number of cores per socket
-
-=item threads
-
-The number of threads per core
-
-=back
-
 =item my $info = $con->get_node_security_model()
 
 Returns a hash reference summarising the security model of the
@@ -1384,6 +1404,22 @@ Returns the free memory on each NUMA cell between C<$start> and C<$end>.
 
 The following sets of constants are useful when dealing with APIs
 in this package
+
+=head2 CONNECTION
+
+When opening a connection the following constants can be used:
+
+=over 4
+
+=item Sys::Virt::CONNECT_RO
+
+Request a read-only connection
+
+=item Sys::Virt::CONNECT_NO_ALIASES
+
+Prevent the resolution of URI aliases
+
+=back
 
 =head2 CREDENTIAL TYPES
 
@@ -1446,6 +1482,45 @@ The host has an identical CPU description
 =item Sys::Virt::CPU_COMPARE_SUPERSET
 
 The host offers a superset of the CPU descriptoon
+
+=back
+
+=head2 NODE SUSPEND CONSTANTS
+
+=over 4
+
+=item Sys::Virt::NODE_SUSPEND_TARGET_MEM
+
+Suspends to memory (equivalent of S3 on x86 architectures)
+
+=item Sys::Virt::NODE_SUSPEND_TARGET_DISK
+
+Suspends to disk (equivalent of S5 on x86 architectures)
+
+=item Sys::Virt::NODE_SUSPEND_TARGET_HYBRID
+
+Suspends to memory and disk (equivalent of S3+S5 on x86 architectures)
+
+=back
+
+=head2 NODE VCPU CONSTANTS
+
+=over 4
+
+=item Sys::Virt::NODE_CPU_STATS_ALL_CPUS
+
+Request statistics for all CPUs
+
+=back
+
+=head2 NODE MEMORY CONSTANTS
+
+=over 4
+
+=item Sys::Virt::NODE_MEMORY_STATS_ALL_CELLS
+
+Request statistics for all memory cells
+
 
 =back
 

@@ -54,9 +54,22 @@ sub stringify {
     return "libvirt error code: " . $self->{code} . ", message: " . $self->{message} . ($self->{message} =~ /\n$/ ? "" : "\n");
 }
 
+=item my $code = $err->level
+
+Return the raw error level represented by this error. One of the
+ERROR LEVEL CONSTANTS
+
+=cut
+
+sub level {
+    my $self = shift;
+    return $self->{code}
+}
+
 =item my $code = $err->code
 
-Return the raw error code represented by this error.
+Return the raw error code represented by this error. One of the
+ERROR CODE CONSTANTS
 
 =cut
 
@@ -67,7 +80,8 @@ sub code {
 
 =item my $from = $err->domain
 
-Return the error domain raising this error.
+Return the error domain raising this error. One of the ERROR
+DOMAIN CONSTANTS
 
 =cut
 
@@ -94,7 +108,25 @@ sub message {
 
 =head1 CONSTANTS
 
-=head2 ERROR DOMAINS
+=head2 ERROR LEVEL CONSTANTS
+
+=over 4
+
+=item Sys::Virt::Error::LEVEL_NONE
+
+Undefined error level
+
+=item Sys::Virt::Error::LEVEL_WARNING
+
+Warning error level
+
+=item Sys::Virt::Error::LEVEL_ERROR
+
+Fatal error level
+
+=back
+
+=head2 ERROR DOMAIN CONSTANTS
 
 The error domain indicates which internal part of libvirt the error
 report was raised from.
@@ -274,9 +306,17 @@ The libxl Xen driver
 
 The lock manager drivers
 
+=item Sys::Virt::Error::FROM_HYPERV
+
+The Hyper-V driver
+
+=item Sys::Virt::Error::FROM_CAPABILITIES
+
+The capabilities driver
+
 =back
 
-=head2 ERROR CODES
+=head2 ERROR CODE CONSTANTS
 
 The error codes allow for specific problems to be identified and
 handled separately from generic error handling.
@@ -523,6 +563,22 @@ The network interface driver is not available
 
 There are multiple interfaces with the requested MAC address
 
+=item Sys::Virt::Error::ERR_BUILD_FIREWALL
+
+The firwall could not be constructed
+
+=item Sys::Virt::Error::WAR_NO_NWFILTER
+
+The network filter driver could not be activated
+
+=item Sys::Virt::Error::ERR_NO_NWFILTER
+
+There is no network filter driver available
+
+=item Sys::Virt::Error::ERR_INVALID_NWFILTER
+
+The network filter object was invalid
+
 =item Sys::Virt::Error::WAR_NO_SECRET
 
 There secret management driver is not available
@@ -567,6 +623,30 @@ The stream object pointer was invalid
 =item Sys::Virt::Error::ERR_ARGUMENT_UNSUPPORTED
 
 The argument value was not supported by the driver
+
+=item Sys::Virt::Error::ERR_STORAGE_POOL_BUILT
+
+The storage pool has already been built
+
+=item Sys::Virt::Error::ERR_STORAGE_PROBE_FAILED
+
+Probing the storage pool failed
+
+=item Sys::Virt::Error::ERR_SNAPSHOT_REVERT_RISKY
+
+Reverting the snapshot could cause data loss
+
+=item Sys::Virt::Error::ERR_OPERATION_ABORTED
+
+The asynchronous operation was aborted at admin request
+
+=item Sys::Virt::Error::ERR_AUTH_CANCELLED
+
+The user cancelled the authentication process
+
+=item Sys::Virt::Error::ERR_NO_DOMAIN_METADATA
+
+The requested metadata does not exist
 
 =back
 
