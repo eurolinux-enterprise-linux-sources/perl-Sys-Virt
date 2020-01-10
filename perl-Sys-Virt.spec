@@ -2,7 +2,7 @@
 
 Name:           perl-Sys-Virt
 Version:        0.10.2
-Release:        5%{?dist}%{?extra_release}
+Release:        6%{?dist}%{?extra_release}
 Summary:        Represent and manage a libvirt hypervisor connection
 License:        GPLv2+ or Artistic
 Group:          Development/Libraries
@@ -20,6 +20,8 @@ Patch9: 0009-Fix-misc-typos-in-POD-docs-for-StoragePool.pm.patch
 Patch10: 0010-Fix-docs-for-flags-param-in-list_all_nwfilters.patch
 Patch11: 0011-Fix-typo-s-Sys-Virt-NWFilters-Sys-Virt-NWFilter.patch
 Patch12: 0012-Fix-some-return-value-checks.patch
+Patch13: 0013-Fix-error-handling-for-virNodeDeviceGetParent.patch
+Patch14: 0014-Fix-handling-of-flags-in-get_vcpu_info.patch
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildRequires:  perl(ExtUtils::MakeMaker)
 BuildRequires:  perl(Test::Pod)
@@ -51,6 +53,8 @@ virtualization containers to be managed with a consistent API.
 %patch10 -p1
 %patch11 -p1
 %patch12 -p1
+%patch13 -p1
+%patch14 -p1
 
 sed -i -e '/Sys-Virt\.spec/d' Makefile.PL
 sed -i -e '/\.spec\.PL$/d' MANIFEST
@@ -85,6 +89,10 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man3/*
 
 %changelog
+* Mon Mar  2 2015 Daniel P. Berrange <berrange@redhat.com> - 0.10.2-6
+- Fix handling of flags in get_vcpu_info (rhbz #905836)
+- Fix handling of get_parent with NodeDev object (rhbz #908274)
+
 * Tue Dec 11 2012 Daniel P. Berrange <berrange@redhat.com> - 0.10.2-5
 - Fix module type in list_all_nwfilters (rhbz #883775)
 - Fix POD doc errors in StoragePool module (rhbz #882829)
