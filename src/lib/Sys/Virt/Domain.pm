@@ -213,6 +213,164 @@ constants &Sys::Virt::Domain::STATE_*.
 
 =back
 
+=item my ($state, $reason) = $dom->get_state()
+
+Returns an array whose values specify the current state
+of the guest, and the reason for it being in that state.
+The C<$state> values are the same as for the C<get_info>
+API, and the C<$reason> values come from:
+
+=over 4
+
+=item Sys::Virt::Domain::STATE_CRASHED_UNKNOWN
+
+It is not known why the domain has crashed
+
+=item Sys::Virt::Domain::STATE_NOSTATE_UNKNOWN
+
+It is not known why the domain has no state
+
+=item Sys::Virt::Domain::STATE_PAUSED_DUMP
+
+The guest is paused due to a core dump operation
+
+=item Sys::Virt::Domain::STATE_PAUSED_FROM_SNAPSHOT
+
+The guest is paused due to a snapshot
+
+=item Sys::Virt::Domain::STATE_PAUSED_IOERROR
+
+The guest is paused due to an I/O error
+
+=item Sys::Virt::Domain::STATE_PAUSED_MIGRATION
+
+The guest is paused due to migration
+
+=item Sys::Virt::Domain::STATE_PAUSED_SAVE
+
+The guest is paused due to a save operation
+
+=item Sys::Virt::Domain::STATE_PAUSED_UNKNOWN
+
+It is not known why the domain has paused
+
+=item Sys::Virt::Domain::STATE_PAUSED_USER
+
+The guest is paused at admin request
+
+=item Sys::Virt::Domain::STATE_PAUSED_WATCHDOG
+
+The guest is paused due to the watchdog
+
+=item Sys::Virt::Domain::STATE_RUNNING_BOOTED
+
+The guest is running after being booted
+
+=item Sys::Virt::Domain::STATE_RUNNING_FROM_SNAPSHOT
+
+The guest is running after restore from snapshot
+
+=item Sys::Virt::Domain::STATE_RUNNING_MIGRATED
+
+The guest is running after migration
+
+=item Sys::Virt::Domain::STATE_RUNNING_MIGRATION_CANCELED
+
+The guest is running after migration abort
+
+=item Sys::Virt::Domain::STATE_RUNNING_RESTORED
+
+The guest is running after restore from file
+
+=item Sys::Virt::Domain::STATE_RUNNING_SAVE_CANCELED
+
+The guest is running after save cancel
+
+=item Sys::Virt::Domain::STATE_RUNNING_UNKNOWN
+
+It is not known why the domain has started
+
+=item Sys::Virt::Domain::STATE_RUNNING_UNPAUSED
+
+The guest is running after a resume
+
+=item Sys::Virt::Domain::STATE_SHUTDOWN_UNKNOWN
+
+It is not known why the domain has shutdown
+
+=item Sys::Virt::Domain::STATE_SHUTDOWN_USER
+
+The guest is shutdown due to admin request
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_CRASHED
+
+The guest is shutoff after a crash
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_DESTROYED
+
+The guest is shutoff after being destroyed
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_FAILED
+
+The guest is shutoff due to a virtualization failure
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_FROM_SNAPSHOT
+
+The guest is shutoff after a snapshot
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_MIGRATED
+
+The guest is shutoff after migration
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_SAVED
+
+The guest is shutoff after a save
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_SHUTDOWN
+
+The guest is shutoff due to controlled shutdown
+
+=item Sys::Virt::Domain::STATE_SHUTOFF_UNKNOWN
+
+It is not known why the domain has shutoff
+
+=back
+
+=item my $info = $dom->get_control_info($flags=0)
+
+Returns a hash reference providing information about
+the control channel. The returned keys in the hash
+are
+
+=over 4
+
+=item C<state>
+
+One of the CONTROL INFO constants listed later
+
+=item C<details>
+
+Currently unsed, always 0.
+
+=item C<stateTime>
+
+The elapsed time since the control channel entered
+the current state.
+
+=back
+
+=item $dom->send_key($keycodeset, $holdtime, \@keycodes, $flags=0)
+
+Sends a sequence of keycodes to the guest domain. The
+C<$keycodeset> should be one of the constants listed
+later in the KEYCODE SET section. C<$holdtiem> is the
+duration, in milliseconds, to keep the key pressed
+before releasing it and sending the next keycode.
+C<@keycodes> is an array reference containing the list
+of keycodes to send to the guest. The elements in the
+array should be keycode values from the specified
+keycode set. C<$flags> is currently unused.
+
 =item my $info = $dom->get_block_info($dev, $flags=0)
 
 Returns a hash reference summarising the disk usage of
@@ -248,11 +406,14 @@ value of the C<$mem> parameter is specified in kilobytes.
 Returns the current maximum memory allowed for this domain in
 kilobytes.
 
-=item $dom->set_memory($mem)
+=item $dom->set_memory($mem, $flags)
 
 Set the current memory for the domain to the value C<$mem>. The
 value of the C<$mem> parameter is specified in kilobytes. This
 must be less than, or equal to the domain's max memory limit.
+The C<$flags> parameter can control whether the update affects
+the live guest, or inactive config, defaulting to modifying
+the current state.
 
 =item $dom->shutdown()
 
@@ -381,6 +542,26 @@ Some kind of error count
 
 =back
 
+=item my $params = $dom->get_blkio_parameters()
+
+Return a hash reference containing the set of blkio tunable
+parameters for the guest. The keys in the hash are one of the
+constants BLKIO PARAMETERS described later.
+
+=item $dom->set_blkio_parameters($params)
+
+Update the blkio tunable parameters for the guest. The
+C<$params> should be a hash reference whose keys are one
+of the BLKIO PARAMETERS constants.
+
+=over 4
+
+=item C<weight>
+
+Relative I/O weighting
+
+=back
+
 =item $dom->interface_stats($path)
 
 Fetch the current I/O statistics for the block device given by C<$path>.
@@ -481,8 +662,13 @@ will be performed. The C<flags>, C<dname>, C<uri> and C<bandwidth>
 parameters are all optional, and if omitted default to zero, C<undef>,
 C<undef>, and zero respectively.
 
+=item $ddom = $dom->migrate2(destcon, dxml, flags, dname, uri, bandwidth)
 
-=item $dom->migrate_to_uri(desturi, flags, dname, uri, bandwidth)
+Migrate a domain to an alternative host. This function works in the
+same way as C<migrate>, except is also allows C<dxml> to specify a
+changed XML configuration for the guest on the target host.
+
+=item $dom->migrate_to_uri(desturi, flags, dname, bandwidth)
 
 Migrate a domain to an alternative host. The C<destri> parameter
 should be a valid libvirt connection URI for the remote target host.
@@ -496,9 +682,18 @@ with the C<destcon> connection. If the destination host is multi-homed
 it may be necessary to supply an alternate destination hostame
 via the C<uri> parameter. The C<bandwidth> parameter allows network
 usage to be throttled during migration. If set to zero, no throttling
-will be performed. The C<flags>, C<dname>, C<uri> and C<bandwidth>
+will be performed. The C<flags>, C<dname> and C<bandwidth>
 parameters are all optional, and if omitted default to zero, C<undef>,
 C<undef>, and zero respectively.
+
+=item $dom->migrate_to_uri2(dconnuri, miguri, dxml, flags, dname, bandwidth)
+
+Migrate a domain to an alternative host. This function works in almost
+the same way as C<migrate_to_uri>, except is also allows C<dxml> to
+specify a changed XML configuration for the guest on the target host.
+The C<dconnuri> must always specify the URI of the remote libvirtd
+daemon, or be C<undef>. The C<miguri> parameter can be used to specify
+the URI for initiating the migration operation, or be C<undef>.
 
 
 =item $dom->migrate_set_max_downtime($downtime, $flags)
@@ -508,6 +703,25 @@ longer downtime makes it more likely that migration will complete,
 at the cost of longer time blackout for the guest OS at the switch
 over point. The C<downtime> parameter is measured in milliseconds.
 The C<$flags> parameter is currently unused and defaults to zero.
+
+=item $dom->migrate_set_max_speed($bandwidth, $flags)
+
+Set the maximum allowed bandwidth during migration of the guest.
+The C<bandwidth> parameter is measured in kilobytes/second.
+The C<$flags> parameter is currently unused and defaults to zero.
+
+=item $dom->inject_nmi($flags)
+
+Trigger an NMI in the guest virtual machine. The C<$flags> parameter
+is currently unused and defaults to 0.
+
+=item $dom->screenshot($st, $screen, $flags)
+
+Capture a screenshot of the virtual machine's monitor. The C<$screen>
+parameter controls which monitor is captured when using a multi-head
+or multi-card configuration. C<$st> must be a C<Sys::Virt::Stream>
+object from which the data can be read. C<$flags> is currently unused
+and defaults to 0.
 
 =item @vcpuinfo = $dom->get_vcpu_info()
 
@@ -535,6 +749,29 @@ background job. The elements of the hash are as follows:
 =item $dom->abort_job()
 
 Aborts the currently executing job
+
+=item my $info = $dom->get_block_job_info($path, $flags=0)
+
+Returns a hash reference summarising the execution state of
+the block job. The C<$path> parameter should be the fully
+qualified path of the block device being changed.
+
+=item $dom->set_block_job_speed($path, $bandwidth, $flags=0)
+
+Change the maximum I/O bandwidth used by the block job that
+is currently executing for C<$path>. The C<$bandwidth> argument
+is specified in KB/s
+
+=item $dom->abort_block_job($path, $flags=0)
+
+Abort the current job that is executing for the block device
+associated with C<$path>
+
+=item $dom->block_pull($path, $bandwith, $flags=0)
+
+Merge the backing files associated with C<$path> into the
+top level file. The C<$bandwidth> parameter specifies the
+maximum I/O rate to allow in KB/s.
 
 =item $count = $dom->num_of_snapshots()
 
@@ -686,6 +923,31 @@ The domain is inactive, and crashed.
 =back
 
 
+=head2 CONTROL INFO
+
+The following constants can be used to determine what the
+guest domain control channel status is
+
+=over 4
+
+=item Sys::Virt::Domain::CONTROL_ERROR
+
+The control channel has a fatal error
+
+=item Sys::Virt::Domain::CONTROL_OK
+
+The control channel is ready for jobs
+
+=item Sys::Virt::Domain::CONTROL_OCCUPIED
+
+The control channel is busy
+
+=item Sys::Virt::Domain::CONTROL_JOB
+
+The control channel is busy with a job
+
+=back
+
 =head2 DOMAIN CREATION
 
 The following constants can be used to control the behaviour
@@ -697,8 +959,61 @@ of domain creation
 
 Keep the guest vCPUs paused after starting the guest
 
+=item Sys::Virt::Domain::START_AUTODESTROY
+
+Automatically destroy the guest when the connection is closed (or fails)
+
+=item Sys::Virt::Domain::START_BYPASS_CACHE
+
+Do not use OS I/O cache if starting a domain with a saved state image
+
 =back
 
+
+=head2 KEYCODE SETS
+
+The following constants define the set of supported keycode
+sets
+
+=over 4
+
+=item Sys::Virt::Domain::KEYCODE_SET_LINUX
+
+The Linux event subsystem keycodes
+
+=item Sys::Virt::Domain::KEYCODE_SET_XT
+
+The original XT keycodes
+
+=item Sys::Virt::Domain::KEYCODE_SET_ATSET1
+
+The AT Set1 keycodes (aka XT)
+
+=item Sys::Virt::Domain::KEYCODE_SET_ATSET2
+
+The AT Set2 keycodes (aka AT)
+
+=item Sys::Virt::Domain::KEYCODE_SET_ATSET3
+
+The AT Set3 keycodes (aka PS2)
+
+=item Sys::Virt::Domain::KEYCODE_SET_OSX
+
+The OS-X keycodes
+
+=item Sys::Virt::Domain::KEYCODE_SET_XT_KBD
+
+The XT keycodes from the Linux Keyboard driver
+
+=item Sys::Virt::Domain::KEYCODE_SET_USB
+
+The USB HID keycode set
+
+=item Sys::Virt::Domain::KEYCODE_SET_WIN32
+
+The Windows keycode set
+
+=back
 
 =head2 MEMORY PEEK
 
@@ -776,6 +1091,52 @@ Modify only the persistent config of the domain
 
 =back
 
+=head2 MEMORY OPTIONS
+
+The following constants are used to control memory change
+operations
+
+=over 4
+
+=item Sys::Virt::Domain::MEM_CURRENT
+
+Modify the current state
+
+=item Sys::Virt::Domain::MEM_LIVE
+
+Modify only the live state of the domain
+
+=item Sys::Virt::Domain::MEM_CONFIG
+
+Modify only the persistent config of the domain
+
+=item Sys::Virt::Domain::MEM_MAXIMUM
+
+Modify the maximum memory value
+
+=back
+
+=head2 CONFIG OPTIONS
+
+The following constants are used to control what configuration
+a domain update changes
+
+=over 4
+
+=item Sys::Virt::Domain::AFFECT_CURRENT
+
+Modify the current state
+
+=item Sys::Virt::Domain::AFFECT_LIVE
+
+Modify only the live state of the domain
+
+=item Sys::Virt::Domain::AFFECT_CONFIG
+
+Modify only the persistent config of the domain
+
+=back
+
 =head2 MIGRATE OPTIONS
 
 The following constants are used to control how migration
@@ -814,8 +1175,36 @@ completes successfully.
 Do not re-start execution of the guest CPUs on the destination
 host after migration completes.
 
+=item Sys::Virt::Domain::MIGRATE_NON_SHARED_DISK
+
+Copy the complete contents of the disk images during migration
+
+=item Sys::Virt::Domain::MIGRATE_NON_SHARED_INC
+
+Copy the incrementally changed contents of the disk images
+during migration
+
+=item Sys::Virt::Domain::MIGRATE_CHANGE_PROTECTION
+
+Do not allow changes to the virtual domain configuration while
+migration is taking place. This option is automatically implied
+if doing a peer-2-peer migration.
+
 =back
 
+=head2 UNDEFINE CONSTANTS
+
+The following constants can be used when undefining virtual
+domain configurations
+
+=over 4
+
+=item Sys::Virt::Domain::UNDEFINE_MANAGED_SAVE
+
+Also remove any managed save image when undefining the virtual
+domain
+
+=back
 
 =head2 JOB TYPES
 
@@ -876,7 +1265,18 @@ The maximum swap the guest can use.
 
 =item Sys::Virt::Domain::MEMORY_PARAM_UNLIMITED
 
-The value that indicates "unlimited"
+The value of an unlimited memory parameter
+
+=back
+
+
+=head2 BLKIO PARAMETERS
+
+=over 4
+
+=item Sys::Virt::Domain::BLKIO_WEIGHT
+
+The I/O weight parameter
 
 =back
 
@@ -894,6 +1294,10 @@ Flag to request the live value
 =item Sys::Virt::Domain::VCPU_CONFIG
 
 Flag to request the persistent config value
+
+=item Sys::Virt::Domain::VCPU_CURRENT
+
+Flag to request the current config value
 
 =back
 
@@ -1057,6 +1461,14 @@ Graphics client connections.
 
 File IO errors, typically from disks, with a root cause
 
+=item Sys::Virt::Domain::EVENT_ID_CONTROL_ERROR
+
+Errors from the virtualization control channel
+
+=item Sys::Virt::Domain::EVENT_ID_BLOCK_JOB
+
+Completion status of asynchronous block jobs
+
 =back
 
 =head2 IO ERROR EVENT CONSTANTS
@@ -1146,6 +1558,74 @@ An IPv4 address
 =item Sys::Virt::Domain::EVENT_GRAPHICS_ADDRESS_IPV6
 
 An IPv6 address
+
+=back
+
+=head2 DOMAIN BLOCK JOB TYPE CONSTANTS
+
+The following constants identify the different types of domain
+block jobs
+
+=over 4
+
+=item Sys::Virt::Domain::BLOCK_JOB_TYPE_UNKNOWN
+
+An unknown block job type
+
+=item Sys::Virt::Domain::BLOCK_JOB_TYPE_PULL
+
+The block pull job type
+
+=back
+
+=head2 DOMAIN BLOCK JOB COMPLETION CONSTANTS
+
+The following constants can be used to determine the completion
+status of a block job
+
+=over 4
+
+=item Sys::Virt::Domain::BLOCK_JOB_COMPLETED
+
+A successfully completed block job
+
+=item Sys::Virt::Domain::BLOCK_JOB_FAILED
+
+An unsuccessful block job
+
+=back
+
+=head2 DOMAIN SAVE / RESTORE CONSTANTS
+
+The following constants can be used when saving or restoring
+virtual machines
+
+=over 4
+
+=item Sys::Virt::Domain::SAVE_BYPASS_CACHE
+
+Do not use OS I/O cache when saving state.
+
+=back
+
+=head2 DOMAIN CORE DUMP CONSTANTS
+
+The following constants can be used when triggering domain
+core dumps
+
+=over 4
+
+=item Sys::Virt::Domain::DUMP_LIVE
+
+Do not pause execution while dumping the guest
+
+=item Sys::Virt::Domain::DUMP_CRASH
+
+Crash the guest after completing the core dump
+
+=item Sys::Virt::Domain::DUMP_BYPASS_CACHE
+
+Do not use OS I/O cache when writing core dump
 
 =back
 

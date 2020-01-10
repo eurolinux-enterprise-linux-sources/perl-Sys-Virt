@@ -46,9 +46,9 @@ my $guestword = $xp->find("string(/capabilities/guest[1]/arch/wordsize)");
 is($guestword, "32", "wordsize");
 my $guesttype = $xp->find("string(/capabilities/guest[1]/arch/domain/\@type)");
 is($guesttype, "test", "type");
-my $guestpae = $xp->find("count(/capabilities/guest[1]/features/pae)");
+my $guestpae = int($xp->find("count(/capabilities/guest[1]/features/pae)"));
 is($guestpae,  1, "pae");
-my $guestnonpae = $xp->find("count(/capabilities/guest[1]/features/nonpae)");
+my $guestnonpae = int($xp->find("count(/capabilities/guest[1]/features/nonpae)"));
 is($guestnonpae, 1, "nonpae");
 
 my $ver = $conn->get_version();
@@ -67,6 +67,7 @@ is($max, 32, "max cpus");
 
 my $thishost = hostname();
 my ($canonhost, $other) = gethostbyname($thishost);
+$canonhost = $thishost unless $canonhost;
 my $host = $conn->get_hostname();
 is($host, $canonhost, "hostname");
 

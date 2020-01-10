@@ -69,8 +69,9 @@ use Sys::Virt::Interface;
 use Sys::Virt::Secret;
 use Sys::Virt::NWFilter;
 use Sys::Virt::DomainSnapshot;
+use Sys::Virt::Stream;
 
-our $VERSION = '0.2.5';
+our $VERSION = '0.9.4';
 require XSLoader;
 XSLoader::load('Sys::Virt', $VERSION);
 
@@ -188,6 +189,20 @@ sub new {
     bless $self, $class;
 
     return $self;
+}
+
+
+=item my $st = $vmm->new_stream($flags)
+
+Create a new stream, with the given flags
+
+=cut
+
+sub new_stream {
+    my $self = shift;
+    my $flags = shift || 0;
+
+    return Sys::Virt::Stream->_new(connection => $self, flags => $flags);
 }
 
 
@@ -744,6 +759,21 @@ used as the C<maxids> parameter to C<list_nwfilter_names>.
 Return a list of all nwfilter names currently known to the VMM. The names can
 be used with the C<get_nwfilter_by_name> method.
 
+=cut
+
+=item $vmm->define_save_image_xml($file, $dxml, $flags=0)
+
+Update the XML associated with a virtual machine's save image. The C<$file>
+parameter is the fully qualified path to the save image XML, while C<$dxml>
+is the new XML document to write. The C<$flags> parameter is currently
+unused and defaults to zero.
+
+=item $xml = $vmm->get_save_image_xml_description($file, $flags=1)
+
+Retrieve the current XML configuration associated with the virtual
+machine's save image identified by C<$file>. The C<$flags> parameter is currently
+unused and defaults to zero.
+
 =item my $dom = $vmm->get_domain_by_name($name)
 
 Return the domain with a name of C<$name>. The returned object is
@@ -993,6 +1023,21 @@ C<$flags> parameter is optional, and if omitted defaults to zero. The
 returned scalar is an XML document describing the discovered storage
 pool sources.
 
+=item $vmm->interface_change_begin($flags)
+
+Begin a transaction for changing the configuration of one or more
+network interfaces
+
+=item $vmm->interface_change_commit($flags)
+
+Complete a transaction for changing the configuration of one or more
+network interfaces
+
+=item $vmm->interface_change_rollback($flags)
+
+Abort a transaction for changing the configuration of one or more
+network interfaces
+
 =item $vmm->restore_domain($savefile)
 
 Recreate a domain from the saved state file given in the C<$savefile> parameter.
@@ -1011,6 +1056,11 @@ Return the name of the host with which this connection is associated.
 Return the URI associated with the open connection. This may be different
 from the URI used when initially connecting to libvirt, when 'auto-probing'
 or drivers occurrs.
+
+=item my $xml = $vmm->get_sysinfo()
+
+Return an XML documenting representing the host system information,
+typically obtained from SMBIOS tables.
 
 =item my $type = $vmm->get_type()
 
@@ -1113,6 +1163,70 @@ encrypted.
 
 Returns a hash reference summarising the capabilities of the host
 node. The elements of the hash are as follows:
+
+=item my $info = $con->get_node_cpu_stats($cpuNum=-1, $flags=0)
+
+Returns a hash reference providing information about the host
+CPU statistics. If <$cpuNum> is omitted, it defaults to -1
+which causes it to return cummulative information for all
+CPUs in the host. If C<$cpuNum> is zero or larger, it returns
+information just for the specified number. The C<$flags>
+parameter is currently unused and defaults to zero. The
+fields in the returned hash reference are
+
+=over 4
+
+=item kernel
+
+The time spent in kernelspace
+
+=item user
+
+The time spent in userspace
+
+=item idle
+
+The idle time
+
+=item iowait
+
+The I/O wait time
+
+=item utilization
+
+The overall percentage utilization.
+
+=back
+
+=item my $info = $con->get_node_memory_stats($cellNum=-1, $flags=0)
+
+Returns a hash reference providing information about the host
+memory statistics. If <$cellNum> is omitted, it defaults to -1
+which causes it to return cummulative information for all
+NUMA cells in the host. If C<$cellNum> is zero or larger, it
+returns information just for the specified number. The C<$flags>
+parameter is currently unused and defaults to zero. The
+fields in the returned hash reference are
+
+=over 4
+
+=item total
+
+The total memory
+
+=item free
+
+The free memory
+
+=item buffers
+
+The memory consumed by buffers
+
+=item cache
+
+The memory consumed for cache
+
+=back
 
 =item $conn->domain_event_register($callback)
 

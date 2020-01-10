@@ -448,6 +448,47 @@ _domain_event_graphics_callback(virConnectPtr con,
     return 0;
 }
 
+static int
+_domain_event_block_job_callback(virConnectPtr con,
+                                 virDomainPtr dom,
+                                 const char *path,
+                                 int type,
+                                 int status,
+                                 void *opaque)
+{
+    AV *data = opaque;
+    SV **self;
+    SV **cb;
+    SV *domref;
+    dSP;
+
+    self = av_fetch(data, 0, 0);
+    cb = av_fetch(data, 1, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    domref = sv_newmortal();
+    sv_setref_pv(domref, "Sys::Virt::Domain", (void*)dom);
+    virDomainRef(dom);
+    XPUSHs(domref);
+    XPUSHs(sv_2mortal(newSVpv(path, 0)));
+    XPUSHs(sv_2mortal(newSViv(type)));
+    XPUSHs(sv_2mortal(newSViv(status)));
+    PUTBACK;
+
+    call_sv(*cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+
+    return 0;
+}
+
 static void
 _domain_event_free(void *opaque)
 {
@@ -697,6 +738,206 @@ _open_auth_callback(virConnectCredentialPtr cred,
   return success;
 }
 
+static void
+_event_handle_helper(int watch,
+                     int fd,
+                     int events,
+                     void *opaque)
+{
+    SV *cb = opaque;
+    dSP;
+
+    SvREFCNT_inc(cb);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(sv_2mortal(newSViv(watch)));
+    XPUSHs(sv_2mortal(newSViv(fd)));
+    XPUSHs(sv_2mortal(newSViv(events)));
+    PUTBACK;
+
+    call_sv(cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+}
+
+
+static void
+_event_timeout_helper(int timer,
+                      void *opaque)
+{
+    SV *cb = opaque;
+    dSP;
+
+    SvREFCNT_inc(cb);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(sv_2mortal(newSViv(timer)));
+    PUTBACK;
+
+    call_sv(cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+}
+
+
+static void
+_event_cb_free(void *opaque)
+{
+    SV *data = opaque;
+    SvREFCNT_dec(data);
+}
+
+
+static void
+_stream_event_callback(virStreamPtr st,
+                       int events,
+                       void *opaque)
+{
+    AV *data = opaque;
+    SV **self;
+    SV **cb;
+    dSP;
+
+    self = av_fetch(data, 0, 0);
+    cb = av_fetch(data, 1, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    XPUSHs(sv_2mortal(newSViv(events)));
+    PUTBACK;
+
+    call_sv(*cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+}
+
+
+static void
+_stream_event_free(void *opaque)
+{
+    AV *data = opaque;
+    SvREFCNT_dec(data);
+}
+
+
+static int
+_stream_send_all_source(virStreamPtr st,
+                        char *data,
+                        size_t nbytes,
+                        void *opaque)
+{
+    AV *av = opaque;
+    SV **self;
+    SV **handler;
+    SV *datasv;
+    int rv;
+    int ret;
+    dSP;
+
+    self = av_fetch(av, 0, 0);
+    handler = av_fetch(av, 1, 0);
+    datasv = newSVpv("", 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    XPUSHs(datasv);
+    XPUSHs(sv_2mortal(newSViv(nbytes)));
+    PUTBACK;
+
+    rv = call_sv((SV*)*handler, G_SCALAR);
+
+    SPAGAIN;
+
+    if (rv == 1) {
+        ret = POPi;
+    } else {
+        ret = -1;
+    }
+
+    if (ret > 0) {
+        const char *newdata = SvPV_nolen(datasv);
+        if (ret > nbytes)
+            ret = nbytes;
+        strncpy(data, newdata, nbytes);
+    }
+
+    FREETMPS;
+    LEAVE;
+
+    SvREFCNT_dec(datasv);
+
+    return ret;
+}
+
+
+static int
+_stream_recv_all_sink(virStreamPtr st,
+                      const char *data,
+                      size_t nbytes,
+                      void *opaque)
+{
+    AV *av = opaque;
+    SV **self;
+    SV **handler;
+    SV *datasv;
+    int rv;
+    int ret;
+    dSP;
+
+    self = av_fetch(av, 0, 0);
+    handler = av_fetch(av, 1, 0);
+    datasv = newSVpv(data, nbytes);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    XPUSHs(datasv);
+    XPUSHs(sv_2mortal(newSViv(nbytes)));
+    PUTBACK;
+
+    rv = call_sv((SV*)*handler, G_SCALAR);
+
+    SPAGAIN;
+
+    if (rv == 1) {
+        ret = POPi;
+    } else {
+        ret = -1;
+    }
+
+    FREETMPS;
+    LEAVE;
+
+    SvREFCNT_dec(datasv);
+
+    return ret;
+}
+
+
+
 
 MODULE = Sys::Virt  PACKAGE = Sys::Virt
 
@@ -767,13 +1008,57 @@ PREINIT:
       RETVAL
 
 void
-restore_domain(con, from)
+restore_domain(con, from, dxmlsv=&PL_sv_undef, flags=0)
       virConnectPtr con;
       const char *from;
+      SV *dxmlsv;
+      unsigned int flags;
+ PREINIT:
+      const char *dxml = NULL;
   PPCODE:
-      if((virDomainRestore(con, from)) < 0) {
-	_croak_error(virConnGetLastError(con));
+      if (SvOK(dxmlsv))
+	  dxml = SvPV_nolen(dxmlsv);
+
+      if (dxml || flags) {
+          if (virDomainRestoreFlags(con, from, dxml, flags) < 0) {
+	  _croak_error(virGetLastError());
+        }
+      } else {
+        if (virDomainRestore(con, from) < 0) {
+	  _croak_error(virGetLastError());
+        }
       }
+
+
+SV *
+get_save_image_xml_description(con, file, flags=0)
+      virConnectPtr con;
+      const char *file;
+      unsigned int flags;
+  PREINIT:
+      char *xml;
+    CODE:
+      if (!(xml = virDomainSaveImageGetXMLDesc(con, file, flags))) {
+	 _croak_error(virGetLastError());
+      }
+      RETVAL = newSVpv(xml, 0);
+      free(xml);
+  OUTPUT:
+      RETVAL
+
+
+void
+define_save_image_xml(con, file, xml, flags=0)
+      virConnectPtr con;
+      const char *file;
+      const char *xml;
+      unsigned int flags;
+    PPCODE:
+if (virDomainSaveImageDefineXML(con, file, xml, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+
+
 
 unsigned long
 _get_library_version(void)
@@ -794,7 +1079,7 @@ _get_conn_version(con)
       unsigned long version;
    CODE:
       if (virConnectGetVersion(con, &version) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       RETVAL = version;
   OUTPUT:
@@ -807,7 +1092,7 @@ _get_conn_library_version(con)
       unsigned long version;
    CODE:
       if (virConnectGetLibVersion(con, &version) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       RETVAL = version;
   OUTPUT:
@@ -818,7 +1103,7 @@ is_encrypted(conn)
       virConnectPtr conn;
     CODE:
       if ((RETVAL = virConnectIsEncrypted(conn)) < 0) {
-          _croak_error(virConnGetLastError(conn));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -828,7 +1113,7 @@ is_secure(conn)
       virConnectPtr conn;
     CODE:
       if ((RETVAL = virConnectIsSecure(conn)) < 0) {
-          _croak_error(virConnGetLastError(conn));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -849,6 +1134,16 @@ get_uri(con)
  OUTPUT:
       RETVAL
 
+char *
+get_sysinfo(con, flags=0)
+      virConnectPtr con;
+      unsigned int flags;
+   CODE:
+      RETVAL = virConnectGetSysinfo(con, flags);
+ OUTPUT:
+      RETVAL
+
+
 HV *
 get_node_info(con)
       virConnectPtr con;
@@ -856,7 +1151,7 @@ get_node_info(con)
       virNodeInfo info;
     CODE:
       if (virNodeGetInfo(con, &info) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "model", 5, newSVpv(info.model, 0), 0);
@@ -878,7 +1173,7 @@ get_node_security_model(con)
       virSecurityModel secmodel;
     CODE:
       if (virNodeGetSecurityModel(con, &secmodel) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "model", 5, newSVpv(secmodel.model, 0), 0);
@@ -893,7 +1188,7 @@ PREINIT:
       unsigned long long mem;
    CODE:
       if ((mem = virNodeGetFreeMemory(con)) == 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       RETVAL = virt_newSVull(mem);
   OUTPUT:
@@ -912,7 +1207,7 @@ PREINIT:
       Newx(mem, end-start, unsigned long long);
       if ((num = virNodeGetCellsFreeMemory(con, mem, start, end)) < 0) {
 	Safefree(mem);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, num);
       for (i = 0 ; i < num ; i++) {
@@ -922,6 +1217,76 @@ PREINIT:
       Safefree(mem);
 
 
+HV *
+get_node_cpu_stats(con, cpuNum=VIR_NODE_CPU_STATS_ALL_CPUS, flags=0)
+      virConnectPtr con;
+      int cpuNum;
+      unsigned int flags;
+PREINIT:
+      virNodeCPUStatsPtr params;
+      int nparams;
+      int i;
+  CODE:
+      if (virNodeGetCPUStats(con, cpuNum, NULL, &nparams, flags) < 0) {
+            _croak_error(virGetLastError());
+      }
+
+      Newx(params, nparams, virNodeCPUStats);
+      if (virNodeGetCPUStats(con, cpuNum, params, &nparams, flags) < 0) {
+            _croak_error(virGetLastError());
+      }
+      RETVAL = (HV *)sv_2mortal((SV*)newHV());
+      for (i = 0 ; i < nparams ; i++) {
+          if (strcmp(params[i].field, VIR_NODE_CPU_STATS_KERNEL) == 0) {
+              (void)hv_store (RETVAL, "kernel", 6, virt_newSVull(params[i].value), 0);
+          } else if (strcmp(params[i].field, VIR_NODE_CPU_STATS_USER) == 0) {
+              (void)hv_store (RETVAL, "user", 4, virt_newSVull(params[i].value), 0);
+          } else if (strcmp(params[i].field, VIR_NODE_CPU_STATS_IDLE) == 0) {
+              (void)hv_store (RETVAL, "idle", 4, virt_newSVull(params[i].value), 0);
+          } else if (strcmp(params[i].field, VIR_NODE_CPU_STATS_IOWAIT) == 0) {
+              (void)hv_store (RETVAL, "iowait", 6, virt_newSVull(params[i].value), 0);
+          } else if (strcmp(params[i].field, VIR_NODE_CPU_STATS_UTILIZATION) == 0) {
+              (void)hv_store (RETVAL, "utilization", 11, virt_newSVull(params[i].value), 0);
+          }
+      }
+      Safefree(params);
+  OUTPUT:
+      RETVAL
+
+HV *
+get_node_memory_stats(con, cellNum=VIR_NODE_MEMORY_STATS_ALL_CELLS, flags=0)
+      virConnectPtr con;
+      int cellNum;
+      unsigned int flags;
+PREINIT:
+      virNodeMemoryStatsPtr params;
+      int nparams;
+      int i;
+  CODE:
+      if (virNodeGetMemoryStats(con, cellNum, NULL, &nparams, flags) < 0) {
+            _croak_error(virGetLastError());
+      }
+
+      Newx(params, nparams, virNodeMemoryStats);
+      if (virNodeGetMemoryStats(con, cellNum, params, &nparams, flags) < 0) {
+            _croak_error(virGetLastError());
+      }
+      RETVAL = (HV *)sv_2mortal((SV*)newHV());
+      for (i = 0 ; i < nparams ; i++) {
+          if (strcmp(params[i].field, VIR_NODE_MEMORY_STATS_TOTAL) == 0) {
+              (void)hv_store (RETVAL, "total", 6, virt_newSVull(params[i].value), 0);
+          } else if (strcmp(params[i].field, VIR_NODE_MEMORY_STATS_FREE) == 0) {
+              (void)hv_store (RETVAL, "free", 4, virt_newSVull(params[i].value), 0);
+          } else if (strcmp(params[i].field, VIR_NODE_MEMORY_STATS_BUFFERS) == 0) {
+              (void)hv_store (RETVAL, "buffers", 4, virt_newSVull(params[i].value), 0);
+          } else if (strcmp(params[i].field, VIR_NODE_MEMORY_STATS_CACHED) == 0) {
+              (void)hv_store (RETVAL, "cached", 6, virt_newSVull(params[i].value), 0);
+          }
+      }
+      Safefree(params);
+  OUTPUT:
+      RETVAL
+
 char *
 find_storage_pool_sources(con, type, srcspec, flags=0)
       virConnectPtr con;
@@ -930,7 +1295,7 @@ find_storage_pool_sources(con, type, srcspec, flags=0)
       unsigned int flags;
     CODE:
       if ((RETVAL = virConnectFindStoragePoolSources(con, type, srcspec, flags)) == NULL) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -943,7 +1308,7 @@ PREINIT:
       char *xml;
    CODE:
       if (!(xml = virConnectGetCapabilities(con))) {
-	 _croak_error(virConnGetLastError(con));
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
       free(xml);
@@ -959,7 +1324,7 @@ PREINIT:
       int rc;
    CODE:
       if ((rc = virConnectCompareCPU(con, xml, flags)) < 0) {
-	 _croak_error(virConnGetLastError(con));
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSViv(rc);
   OUTPUT:
@@ -986,7 +1351,7 @@ PREINIT:
       }
 
       if (!(retxml = virConnectBaselineCPU(con, xmlstr, xmllen, flags))) {
-	 _croak_error(virConnGetLastError(con));
+	 _croak_error(virGetLastError());
       }
       Safefree(xmlstr);
       RETVAL = newSVpv(retxml, 0);
@@ -1000,7 +1365,7 @@ get_max_vcpus(con, type)
       char *type;
     CODE:
       if ((RETVAL = virConnectGetMaxVcpus(con, type)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1012,7 +1377,7 @@ get_hostname(con)
       char *host;
     CODE:
       if ((host = virConnectGetHostname(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv(host, 0);
       free(host);
@@ -1024,7 +1389,7 @@ num_of_domains(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfDomains(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1040,7 +1405,7 @@ list_domain_ids(con, maxids)
       Newx(ids, maxids, int);
       if ((nid = virConnectListDomains(con, ids, maxids)) < 0) {
         Safefree(ids);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nid);
       for (i = 0 ; i < nid ; i++) {
@@ -1054,7 +1419,7 @@ num_of_defined_domains(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfDefinedDomains(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1071,7 +1436,7 @@ list_defined_domain_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((ndom = virConnectListDefinedDomains(con, names, maxnames)) < 0) {
 	Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, ndom);
       for (i = 0 ; i < ndom ; i++) {
@@ -1086,7 +1451,7 @@ num_of_networks(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfNetworks(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1102,7 +1467,7 @@ list_network_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((nnet = virConnectListNetworks(con, names, maxnames)) < 0) {
         Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nnet);
       for (i = 0 ; i < nnet ; i++) {
@@ -1117,7 +1482,7 @@ num_of_defined_networks(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfDefinedNetworks(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1134,7 +1499,7 @@ list_defined_network_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((ndom = virConnectListDefinedNetworks(con, names, maxnames)) < 0) {
 	Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, ndom);
       for (i = 0 ; i < ndom ; i++) {
@@ -1149,7 +1514,7 @@ num_of_storage_pools(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfStoragePools(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1165,7 +1530,7 @@ list_storage_pool_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((nnet = virConnectListStoragePools(con, names, maxnames)) < 0) {
         Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nnet);
       for (i = 0 ; i < nnet ; i++) {
@@ -1180,7 +1545,7 @@ num_of_defined_storage_pools(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfDefinedStoragePools(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1197,7 +1562,7 @@ list_defined_storage_pool_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((ndom = virConnectListDefinedStoragePools(con, names, maxnames)) < 0) {
 	Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, ndom);
       for (i = 0 ; i < ndom ; i++) {
@@ -1218,7 +1583,7 @@ num_of_node_devices(con, cap, flags=0)
       if (SvOK(cap))
 	  capname = SvPV_nolen(cap);
       if ((RETVAL = virNodeNumOfDevices(con, capname, flags)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1239,7 +1604,7 @@ list_node_device_names(con, cap, maxnames, flags=0)
       Newx(names, maxnames, char *);
       if ((nnet = virNodeListDevices(con, capname, names, maxnames, flags)) < 0) {
         Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nnet);
       for (i = 0 ; i < nnet ; i++) {
@@ -1253,7 +1618,7 @@ num_of_interfaces(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfInterfaces(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1269,7 +1634,7 @@ list_interface_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((nnet = virConnectListInterfaces(con, names, maxnames)) < 0) {
         Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nnet);
       for (i = 0 ; i < nnet ; i++) {
@@ -1284,7 +1649,7 @@ num_of_defined_interfaces(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfDefinedInterfaces(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1300,7 +1665,7 @@ list_defined_interface_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((nnet = virConnectListDefinedInterfaces(con, names, maxnames)) < 0) {
         Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nnet);
       for (i = 0 ; i < nnet ; i++) {
@@ -1315,7 +1680,7 @@ num_of_secrets(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfSecrets(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1332,7 +1697,7 @@ list_secret_uuids(con, maxuuids)
       Newx(uuids, maxuuids, char *);
       if ((nsecret = virConnectListSecrets(con, uuids, maxuuids)) < 0) {
         Safefree(uuids);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nsecret);
       for (i = 0 ; i < nsecret ; i++) {
@@ -1347,7 +1712,7 @@ num_of_nwfilters(con)
       virConnectPtr con;
     CODE:
       if ((RETVAL = virConnectNumOfNWFilters(con)) < 0) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1363,7 +1728,7 @@ list_nwfilter_names(con, maxnames)
       Newx(names, maxnames, char *);
       if ((nnet = virConnectListNWFilters(con, names, maxnames)) < 0) {
         Safefree(names);
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nnet);
       for (i = 0 ; i < nnet ; i++) {
@@ -1383,7 +1748,7 @@ domain_xml_from_native(con, configtype, configdata, flags=0)
       char *xmldata;
     CODE:
       if (!(xmldata = virConnectDomainXMLFromNative(con, configtype, configdata, flags))) {
-        _croak_error(virConnGetLastError(con));
+        _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xmldata, 0);
       free(xmldata);
@@ -1401,7 +1766,7 @@ domain_xml_to_native(con, configtype, xmldata, flags=0)
       char *configdata;
     CODE:
       if (!(configdata = virConnectDomainXMLFromNative(con, configtype, xmldata, flags))) {
-        _croak_error(virConnGetLastError(con));
+        _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(configdata, 0);
       free(configdata);
@@ -1425,7 +1790,7 @@ PREINIT:
       av_push(opaque, cb);
       if (virConnectDomainEventRegister(con, _domain_event_lifecycle_callback,
                                         opaque, _domain_event_free) < 0) {
-          _croak_error(virConnGetLastError(con));
+          _croak_error(virGetLastError());
       }
 
 void
@@ -1475,6 +1840,12 @@ PREINIT:
       case VIR_DOMAIN_EVENT_ID_GRAPHICS:
           callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_graphics_callback);
           break;
+      case VIR_DOMAIN_EVENT_ID_CONTROL_ERROR:
+          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_generic_callback);
+          break;
+      case VIR_DOMAIN_EVENT_ID_BLOCK_JOB:
+          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_block_job_callback);
+          break;
       default:
           callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_generic_callback);
           break;
@@ -1486,7 +1857,7 @@ PREINIT:
       av_push(opaque, conref);
       av_push(opaque, cb);
       if ((RETVAL = virConnectDomainEventRegisterAny(con, dom, eventID, callback, opaque, _domain_event_free)) < 0) {
-          _croak_error(virConnGetLastError(con));
+          _croak_error(virGetLastError());
       }
 OUTPUT:
       RETVAL
@@ -1498,6 +1869,33 @@ domain_event_deregister_any(con, callbackID)
  PPCODE:
       virConnectDomainEventDeregisterAny(con, callbackID);
 
+
+void
+interface_change_begin(conn, flags=0)
+      virConnectPtr conn;
+      unsigned int flags;
+    PPCODE:
+      if (virInterfaceChangeBegin(conn, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+
+void
+interface_change_commit(conn, flags=0)
+      virConnectPtr conn;
+      unsigned int flags;
+    PPCODE:
+      if (virInterfaceChangeCommit(conn, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+
+void
+interface_change_rollback(conn, flags=0)
+      virConnectPtr conn;
+      unsigned int flags;
+    PPCODE:
+      if (virInterfaceChangeRollback(conn, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
 
 
 void
@@ -1522,11 +1920,11 @@ _create(con, xml, flags=0)
     CODE:
       if (flags) {
         if (!(RETVAL = virDomainCreateXML(con, xml, flags))) {
-  	  _croak_error(virConnGetLastError(con));
+  	  _croak_error(virGetLastError());
         }
       } else {
         if (!(RETVAL = virDomainCreateLinux(con, xml, 0))) {
-	  _croak_error(virConnGetLastError(con));
+	  _croak_error(virGetLastError());
         }
       }
   OUTPUT:
@@ -1538,7 +1936,7 @@ _define_xml(con, xml)
       const char *xml;
     CODE:
       if (!(RETVAL = virDomainDefineXML(con, xml))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1549,7 +1947,7 @@ _lookup_by_id(con, id)
       int id;
     CODE:
       if (!(RETVAL = virDomainLookupByID(con, id))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1560,7 +1958,7 @@ _lookup_by_name(con, name)
       const char *name;
     CODE:
       if (!(RETVAL = virDomainLookupByName(con, name))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1571,7 +1969,7 @@ _lookup_by_uuid(con, uuid)
       const unsigned char *uuid;
     CODE:
       if (!(RETVAL = virDomainLookupByUUID(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1582,7 +1980,7 @@ _lookup_by_uuid_string(con, uuid)
       const char *uuid;
     CODE:
       if (!(RETVAL = virDomainLookupByUUIDString(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1603,7 +2001,7 @@ get_uuid(dom)
       unsigned char rawuuid[VIR_UUID_BUFLEN];
     CODE:
       if ((virDomainGetUUID(dom, rawuuid)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv((char*)rawuuid, sizeof(rawuuid));
   OUTPUT:
@@ -1616,7 +2014,7 @@ get_uuid_string(dom)
       char uuid[VIR_UUID_STRING_BUFLEN];
     CODE:
       if ((virDomainGetUUIDString(dom, uuid)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
       RETVAL = newSVpv(uuid, 0);
@@ -1628,7 +2026,7 @@ get_name(dom)
       virDomainPtr dom;
     CODE:
       if (!(RETVAL = virDomainGetName(dom))) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1639,7 +2037,7 @@ is_active(dom)
       virDomainPtr dom;
     CODE:
       if ((RETVAL = virDomainIsActive(dom)) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1650,7 +2048,7 @@ is_persistent(dom)
       virDomainPtr dom;
     CODE:
       if ((RETVAL = virDomainIsPersistent(dom)) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1661,7 +2059,7 @@ is_updated(dom)
       virDomainPtr dom;
     CODE:
       if ((RETVAL = virDomainIsUpdated(dom)) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1672,7 +2070,7 @@ suspend(dom)
       virDomainPtr dom;
   PPCODE:
       if ((virDomainSuspend(dom)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 
@@ -1681,17 +2079,30 @@ resume(dom)
       virDomainPtr dom;
   PPCODE:
       if ((virDomainResume(dom)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 
 void
-save(dom, to)
+save(dom, to, dxmlsv=&PL_sv_undef, flags=0)
       virDomainPtr dom;
-      const char *to
+      const char *to;
+      SV *dxmlsv;
+      unsigned int flags;
+PREINIT:
+      const char *dxml = NULL;
   PPCODE:
-      if ((virDomainSave(dom, to)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (SvOK(dxmlsv))
+	  dxml = SvPV_nolen(dxmlsv);
+
+      if (dxml || flags) {
+        if ((virDomainSaveFlags(dom, to, dxml, flags)) < 0) {
+	  _croak_error(virGetLastError());
+        }
+      } else {
+        if ((virDomainSave(dom, to)) < 0) {
+          _croak_error(virGetLastError());
+        }
       }
 
 
@@ -1701,7 +2112,7 @@ managed_save(dom, flags=0)
       unsigned int flags;
   PPCODE:
       if ((virDomainManagedSave(dom, flags)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 
@@ -1711,7 +2122,7 @@ has_managed_save_image(dom, flags=0)
       unsigned int flags;
     CODE:
       if ((RETVAL = virDomainHasManagedSaveImage(dom, flags)) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -1722,7 +2133,7 @@ managed_save_remove(dom, flags=0)
       unsigned int flags;
   PPCODE:
       if ((virDomainManagedSaveRemove(dom, flags)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -1732,7 +2143,7 @@ core_dump(dom, to, flags=0)
       unsigned int flags;
     PPCODE:
       if (virDomainCoreDump(dom, to, flags) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 
@@ -1743,7 +2154,7 @@ get_info(dom)
       virDomainInfo info;
     CODE:
       if (virDomainGetInfo(dom, &info) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "state", 5, newSViv(info.state), 0);
@@ -1756,6 +2167,52 @@ get_info(dom)
 
 
 HV *
+get_control_info(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+  PREINIT:
+      virDomainControlInfo info;
+    CODE:
+      if (virDomainGetControlInfo(dom, &info, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+      RETVAL = (HV *)sv_2mortal((SV*)newHV());
+      (void)hv_store (RETVAL, "state", 5, newSViv(info.state), 0);
+      (void)hv_store (RETVAL, "details", 7, newSViv(info.details), 0);
+      (void)hv_store (RETVAL, "stateTime", 9, virt_newSVull(info.stateTime), 0);
+  OUTPUT:
+      RETVAL
+
+void
+get_state(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+PREINIT:
+      int state;
+      int reason;
+ PPCODE:
+      if (virDomainGetState(dom, &state, &reason, flags) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+      XPUSHs(sv_2mortal(newSViv(state)));
+      XPUSHs(sv_2mortal(newSViv(reason)));
+
+
+
+void
+screenshot(dom, st, screen, flags=0)
+      virDomainPtr dom;
+      virStreamPtr st;
+      unsigned int screen;
+      unsigned int flags;
+  PPCODE:
+      if (virDomainScreenshot(dom, st, screen, flags) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+
+HV *
 get_block_info(dom, dev, flags=0)
       virDomainPtr dom;
       const char *dev;
@@ -1764,7 +2221,7 @@ get_block_info(dom, dev, flags=0)
       virDomainBlockInfo info;
     CODE:
       if (virDomainGetBlockInfo(dom, dev, &info, flags) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "capacity", 8, virt_newSVull(info.capacity), 0);
@@ -1781,7 +2238,7 @@ get_job_info(dom)
       virDomainJobInfo info;
     CODE:
       if (virDomainGetJobInfo(dom, &info) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "type", 4, newSViv(info.type), 0);
@@ -1801,17 +2258,65 @@ get_job_info(dom)
 
 
 void
-abort_job(dom)
+abort_block_job(dom, path, flags=0)
       virDomainPtr dom;
+      const char *path;
+      unsigned int flags;
     PPCODE:
-      if (virDomainAbortJob(dom) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (virDomainBlockJobAbort(dom, path, flags) < 0) {
+	_croak_error(virGetLastError());
       }
 
 
 HV *
-get_scheduler_parameters(dom)
+get_block_job_info(dom, path, flags=0)
       virDomainPtr dom;
+      const char *path;
+      unsigned int flags;
+  PREINIT:
+      virDomainBlockJobInfo info;
+    CODE:
+      if (virDomainGetBlockJobInfo(dom, path, &info, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+      RETVAL = (HV *)sv_2mortal((SV*)newHV());
+      (void)hv_store (RETVAL, "type", 4, newSViv(info.type), 0);
+      (void)hv_store (RETVAL, "bandwidth", 9, virt_newSVull(info.bandwidth), 0);
+      (void)hv_store (RETVAL, "cur", 3, virt_newSVull(info.cur), 0);
+      (void)hv_store (RETVAL, "end", 3, virt_newSVull(info.end), 0);
+  OUTPUT:
+      RETVAL
+
+
+void
+set_block_job_speed(dom, path, bandwidth, flags=0)
+      virDomainPtr dom;
+      const char *path;
+      unsigned long bandwidth;
+      unsigned int flags;
+    PPCODE:
+      if (virDomainBlockJobSetSpeed(dom, path, bandwidth, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+
+
+void
+block_pull(dom, path, bandwidth, flags=0)
+      virDomainPtr dom;
+      const char *path;
+      unsigned long bandwidth;
+      unsigned int flags;
+    PPCODE:
+      if (virDomainBlockPull(dom, path, bandwidth, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+
+
+
+HV *
+get_scheduler_parameters(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
   PREINIT:
       virSchedParameter *params;
       int nparams;
@@ -1819,13 +2324,20 @@ get_scheduler_parameters(dom)
       char *type;
     CODE:
       if (!(type = virDomainGetSchedulerType(dom, &nparams))) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       free(type);
       Newx(params, nparams, virSchedParameter);
-      if (virDomainGetSchedulerParameters(dom, params, &nparams) < 0) {
-	Safefree(params);
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (flags) {
+        if (virDomainGetSchedulerParametersFlags(dom, params, &nparams, flags) < 0) {
+	  Safefree(params);
+          _croak_error(virGetLastError());
+        }
+      } else {
+        if (virDomainGetSchedulerParameters(dom, params, &nparams) < 0) {
+	  Safefree(params);
+          _croak_error(virGetLastError());
+        }
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       for (i = 0 ; i < nparams ; i++) {
@@ -1864,9 +2376,10 @@ get_scheduler_parameters(dom)
       RETVAL
 
 void
-set_scheduler_parameters(dom, newparams)
+set_scheduler_parameters(dom, newparams, flags=0)
       virDomainPtr dom;
       HV *newparams;
+      unsigned int flags;
   PREINIT:
       virSchedParameter *params;
       int nparams;
@@ -1874,13 +2387,20 @@ set_scheduler_parameters(dom, newparams)
       char *type;
     PPCODE:
       if (!(type = virDomainGetSchedulerType(dom, &nparams))) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       free(type);
       Newx(params, nparams, virSchedParameter);
-      if (virDomainGetSchedulerParameters(dom, params, &nparams) < 0) {
-	Safefree(params);
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (flags) {
+        if (virDomainGetSchedulerParametersFlags(dom, params, &nparams, flags) < 0) {
+          Safefree(params);
+          _croak_error(virGetLastError());
+        }
+      } else {
+        if (virDomainGetSchedulerParameters(dom, params, &nparams) < 0) {
+          Safefree(params);
+          _croak_error(virGetLastError());
+        }
       }
       for (i = 0 ; i < nparams ; i++) {
 	SV **val;
@@ -1917,8 +2437,14 @@ set_scheduler_parameters(dom, newparams)
 	}
 
       }
-      if (virDomainSetSchedulerParameters(dom, params, nparams) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (flags) {
+        if (virDomainSetSchedulerParametersFlags(dom, params, nparams, flags) < 0) {
+          _croak_error(virGetLastError());
+        }
+      } else {
+        if (virDomainSetSchedulerParameters(dom, params, nparams) < 0) {
+          _croak_error(virGetLastError());
+        }
       }
       Safefree(params);
 
@@ -1933,7 +2459,7 @@ get_memory_parameters(dom)
     CODE:
       nparams = 0;
       if (virDomainGetMemoryParameters(dom, NULL, &nparams, 0) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
 
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
@@ -1941,7 +2467,7 @@ get_memory_parameters(dom)
 
       if (virDomainGetMemoryParameters(dom, params, &nparams, 0) < 0) {
           Safefree(params);
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
 
       for (i = 0 ; i < nparams ; i++) {
@@ -1990,14 +2516,14 @@ set_memory_parameters(dom, newparams)
     PPCODE:
       nparams = 0;
       if (virDomainGetMemoryParameters(dom, NULL, &nparams, 0) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
 
       Newx(params, nparams, virMemoryParameter);
 
       if (virDomainGetMemoryParameters(dom, params, &nparams, 0) < 0) {
           Safefree(params);
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
       }
 
       for (i = 0 ; i < nparams ; i++) {
@@ -2036,7 +2562,125 @@ set_memory_parameters(dom, newparams)
 
       }
       if (virDomainSetMemoryParameters(dom, params, nparams, 0) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
+      }
+      Safefree(params);
+
+
+HV *
+get_blkio_parameters(dom)
+      virDomainPtr dom;
+  PREINIT:
+      virBlkioParameter *params;
+      int nparams;
+      unsigned int i;
+    CODE:
+      nparams = 0;
+      if (virDomainGetBlkioParameters(dom, NULL, &nparams, 0) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+      RETVAL = (HV *)sv_2mortal((SV*)newHV());
+      Newx(params, nparams, virBlkioParameter);
+
+      if (virDomainGetBlkioParameters(dom, params, &nparams, 0) < 0) {
+          Safefree(params);
+          _croak_error(virGetLastError());
+      }
+
+      for (i = 0 ; i < nparams ; i++) {
+          SV *val = NULL;
+
+          switch (params[i].type) {
+          case VIR_DOMAIN_SCHED_FIELD_INT:
+              val = newSViv(params[i].value.i);
+              break;
+
+          case VIR_DOMAIN_SCHED_FIELD_UINT:
+              val = newSViv((int)params[i].value.ui);
+              break;
+
+          case VIR_DOMAIN_SCHED_FIELD_LLONG:
+              val = virt_newSVll(params[i].value.l);
+              break;
+
+          case VIR_DOMAIN_SCHED_FIELD_ULLONG:
+              val = virt_newSVull(params[i].value.ul);
+              break;
+
+          case VIR_DOMAIN_SCHED_FIELD_DOUBLE:
+              val = newSVnv(params[i].value.d);
+              break;
+
+          case VIR_DOMAIN_SCHED_FIELD_BOOLEAN:
+              val = newSViv(params[i].value.b);
+              break;
+          }
+
+          (void)hv_store(RETVAL, params[i].field, strlen(params[i].field), val, 0);
+      }
+      Safefree(params);
+  OUTPUT:
+      RETVAL
+
+void
+set_blkio_parameters(dom, newparams)
+      virDomainPtr dom;
+      HV *newparams;
+  PREINIT:
+      virBlkioParameter *params;
+      int nparams;
+      unsigned int i;
+    PPCODE:
+      nparams = 0;
+      if (virDomainGetBlkioParameters(dom, NULL, &nparams, 0) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+      Newx(params, nparams, virBlkioParameter);
+
+      if (virDomainGetBlkioParameters(dom, params, &nparams, 0) < 0) {
+          Safefree(params);
+          _croak_error(virGetLastError());
+      }
+
+      for (i = 0 ; i < nparams ; i++) {
+	SV **val;
+
+	if (!hv_exists(newparams, params[i].field, strlen(params[i].field)))
+	  continue;
+
+	val = hv_fetch (newparams, params[i].field, strlen(params[i].field), 0);
+
+	switch (params[i].type) {
+	case VIR_DOMAIN_SCHED_FIELD_INT:
+	  params[i].value.i = SvIV(*val);
+	  break;
+
+	case VIR_DOMAIN_SCHED_FIELD_UINT:
+	  params[i].value.ui = SvIV(*val);
+	  break;
+
+	case VIR_DOMAIN_SCHED_FIELD_LLONG:
+	  params[i].value.l = virt_SvIVll(*val);
+	  break;
+
+	case VIR_DOMAIN_SCHED_FIELD_ULLONG:
+	  params[i].value.ul = virt_SvIVull(*val);
+	  break;
+
+	case VIR_DOMAIN_SCHED_FIELD_DOUBLE:
+	  params[i].value.d = SvNV(*val);
+	  break;
+
+	case VIR_DOMAIN_SCHED_FIELD_BOOLEAN:
+	  params[i].value.b = SvIV(*val);
+	  break;
+	}
+
+      }
+      if (virDomainSetBlkioParameters(dom, params, nparams, 0) < 0) {
+	_croak_error(virGetLastError());
       }
       Safefree(params);
 
@@ -2046,7 +2690,7 @@ get_max_memory(dom)
       virDomainPtr dom;
     CODE:
       if (!(RETVAL = virDomainGetMaxMemory(dom))) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2057,17 +2701,24 @@ set_max_memory(dom, val)
       unsigned long val;
   PPCODE:
       if (virDomainSetMaxMemory(dom, val) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 
 void
-set_memory(dom, val)
+set_memory(dom, val, flags=0)
       virDomainPtr dom;
       unsigned long val;
+      unsigned int flags;
   PPCODE:
-      if (virDomainSetMemory(dom, val) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (flags) {
+        if (virDomainSetMemoryFlags(dom, val, flags) < 0) {
+          _croak_error(virGetLastError());
+        }
+      } else {
+        if (virDomainSetMemory(dom, val) < 0) {
+          _croak_error(virGetLastError());
+        }
       }
 
 int
@@ -2075,7 +2726,7 @@ get_max_vcpus(dom)
       virDomainPtr dom;
     CODE:
       if (!(RETVAL = virDomainGetMaxVcpus(dom))) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2089,11 +2740,11 @@ set_vcpus(dom, num, flags=0)
   PPCODE:
       if (flags) {
           if (virDomainSetVcpusFlags(dom, num, flags) < 0) {
-              _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+              _croak_error(virGetLastError());
           }
       } else {
           if (virDomainSetVcpus(dom, num) < 0) {
-              _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+              _croak_error(virGetLastError());
           }
       }
 
@@ -2103,7 +2754,7 @@ get_vcpus(dom, flags=0)
     int flags;
   CODE:
     if ((RETVAL = virDomainGetVcpusFlags(dom, flags)) < 0) {
-        _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+        _croak_error(virGetLastError());
     }
 OUTPUT:
     RETVAL
@@ -2116,7 +2767,7 @@ set_autostart(dom, autostart)
       int autostart;
   PPCODE:
       if (virDomainSetAutostart(dom, autostart) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 
@@ -2127,7 +2778,7 @@ get_autostart(dom)
       int autostart;
     CODE:
       if (virDomainGetAutostart(dom, &autostart) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = autostart;
   OUTPUT:
@@ -2141,7 +2792,7 @@ PREINIT:
       int nparams;
     CODE:
       if ((RETVAL = virDomainGetSchedulerType(dom, &nparams)) == NULL) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
    OUTPUT:
       RETVAL
@@ -2154,7 +2805,7 @@ get_os_type(dom)
       char *type;
     CODE:
       if (!(type = virDomainGetOSType(dom))) {
-	 _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(type, 0);
       free(type);
@@ -2162,13 +2813,14 @@ get_os_type(dom)
       RETVAL
 
 SV *
-get_xml_description(dom)
+get_xml_description(dom, flags=0)
       virDomainPtr dom;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virDomainGetXMLDesc(dom, 0))) {
-	 _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (!(xml = virDomainGetXMLDesc(dom, flags))) {
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
       free(xml);
@@ -2180,7 +2832,7 @@ shutdown(dom)
       virDomainPtr dom;
     PPCODE:
       if (virDomainShutdown(dom) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2189,15 +2841,31 @@ reboot(dom, flags=0)
       unsigned int flags;
     PPCODE:
       if (virDomainReboot(dom, flags) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
 void
-undefine(dom)
+inject_nmi(dom, flags=0)
       virDomainPtr dom;
+      unsigned int flags;
     PPCODE:
-      if (virDomainUndefine(dom) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (virDomainInjectNMI(dom, flags) < 0) {
+	_croak_error(virGetLastError());
+      }
+
+void
+undefine(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+    PPCODE:
+      if (flags) {
+        if (virDomainUndefineFlags(dom, flags) < 0) {
+	  _croak_error(virGetLastError());
+        }
+      } else {
+        if (virDomainUndefine(dom) < 0) {
+	  _croak_error(virGetLastError());
+        }
       }
 
 void
@@ -2207,11 +2875,11 @@ create(dom, flags=0)
     PPCODE:
       if (flags) {
         if (virDomainCreateWithFlags(dom, flags) < 0) {
-	  _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	  _croak_error(virGetLastError());
         }
       } else {
         if (virDomainCreate(dom) < 0) {
-	  _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	  _croak_error(virGetLastError());
         }
       }
 
@@ -2233,16 +2901,35 @@ PREINIT:
        uristr = SvPV_nolen(uri);
 
      if ((RETVAL = virDomainMigrate(dom, destcon, flags, dnamestr, uristr, bandwidth)) == NULL) {
-       _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+       _croak_error(virGetLastError());
      }
  OUTPUT:
      RETVAL
 
 
 void
-migrate_to_uri(dom, desturi, flags=0, dname=&PL_sv_undef, uri=&PL_sv_undef, bandwidth=0)
+migrate_to_uri(dom, desturi, flags=0, dname=&PL_sv_undef, bandwidth=0)
      virDomainPtr dom;
      const char *desturi;
+     unsigned long flags;
+     SV *dname;
+     unsigned long bandwidth;
+PREINIT:
+     const char *dnamestr = NULL;
+  PPCODE:
+     if (SvOK(dname))
+       dnamestr = SvPV_nolen(dname);
+
+     if (virDomainMigrateToURI(dom, desturi, flags, dnamestr, bandwidth) < 0) {
+       _croak_error(virGetLastError());
+     }
+
+
+virDomainPtr
+migrate2(dom, destcon, dxml=&PL_sv_undef, flags=0, dname=&PL_sv_undef, uri=&PL_sv_undef, bandwidth=0)
+     virDomainPtr dom;
+     virConnectPtr destcon;
+     SV *dxml;
      unsigned long flags;
      SV *dname;
      SV *uri;
@@ -2250,14 +2937,47 @@ migrate_to_uri(dom, desturi, flags=0, dname=&PL_sv_undef, uri=&PL_sv_undef, band
 PREINIT:
      const char *dnamestr = NULL;
      const char *uristr = NULL;
-  PPCODE:
+     const char *dxmlstr = NULL;
+   CODE:
+     if (SvOK(dxml))
+       dxmlstr = SvPV_nolen(dxml);
      if (SvOK(dname))
        dnamestr = SvPV_nolen(dname);
      if (SvOK(uri))
        uristr = SvPV_nolen(uri);
 
-     if (virDomainMigrateToURI(dom, desturi, flags, dnamestr, bandwidth) < 0) {
-       _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+     if ((RETVAL = virDomainMigrate2(dom, destcon, dxmlstr,
+                                     flags, dnamestr, uristr, bandwidth)) == NULL) {
+       _croak_error(virGetLastError());
+     }
+ OUTPUT:
+     RETVAL
+
+
+void
+migrate_to_uri2(dom, dconnuri, miguri=&PL_sv_undef, dxml=&PL_sv_undef, flags=0, dname=&PL_sv_undef, bandwidth=0)
+     virDomainPtr dom;
+     const char *dconnuri;
+     SV *miguri;
+     SV *dxml;
+     unsigned long flags;
+     SV *dname;
+     unsigned long bandwidth;
+PREINIT:
+     const char *miguristr = NULL;
+     const char *dxmlstr = NULL;
+     const char *dnamestr = NULL;
+  PPCODE:
+     if (SvOK(dxml))
+       dxmlstr = SvPV_nolen(dxml);
+     if (SvOK(miguri))
+       miguristr = SvPV_nolen(miguri);
+     if (SvOK(dname))
+       dnamestr = SvPV_nolen(dname);
+
+     if (virDomainMigrateToURI2(dom, dconnuri, miguristr, dxmlstr,
+                                flags, dnamestr, bandwidth) < 0) {
+       _croak_error(virGetLastError());
      }
 
 
@@ -2271,7 +2991,18 @@ migrate_set_max_downtime(dom, downtime, flags=0)
   PPCODE:
      downtimeVal = virt_SvIVull(downtime);
      if (virDomainMigrateSetMaxDowntime(dom, downtimeVal, flags) < 0) {
-       _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+       _croak_error(virGetLastError());
+     }
+
+
+void
+migrate_set_max_speed(dom, bandwidth, flags=0)
+     virDomainPtr dom;
+     unsigned long bandwidth;
+     unsigned int flags;
+  PPCODE:
+     if (virDomainMigrateSetMaxSpeed(dom, bandwidth, flags) < 0) {
+       _croak_error(virGetLastError());
      }
 
 
@@ -2283,11 +3014,11 @@ attach_device(dom, xml, flags=0)
     PPCODE:
       if (flags) {
         if (virDomainAttachDeviceFlags(dom, xml, flags) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
         }
       } else {
         if (virDomainAttachDevice(dom, xml) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
         }
       }
 
@@ -2300,11 +3031,11 @@ detach_device(dom, xml, flags=0)
     PPCODE:
       if (flags) {
         if (virDomainDetachDeviceFlags(dom, xml, flags) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
         }
       } else {
         if (virDomainDetachDevice(dom, xml) < 0) {
-          _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+          _croak_error(virGetLastError());
         }
       }
 
@@ -2316,7 +3047,7 @@ update_device(dom, xml, flags=0)
       unsigned int flags;
     PPCODE:
       if (virDomainUpdateDeviceFlags(dom, xml, flags) < 0) {
-        _croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+        _croak_error(virGetLastError());
       }
 
 
@@ -2328,7 +3059,7 @@ block_stats(dom, path)
       virDomainBlockStatsStruct stats;
     CODE:
       if (virDomainBlockStats(dom, path, &stats, sizeof(stats)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "rd_req", 6, virt_newSVll(stats.rd_req), 0);
@@ -2348,7 +3079,7 @@ interface_stats(dom, path)
       virDomainInterfaceStatsStruct stats;
     CODE:
       if (virDomainInterfaceStats(dom, path, &stats, sizeof(stats)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "rx_bytes", 8, virt_newSVll(stats.rx_bytes), 0);
@@ -2373,7 +3104,7 @@ memory_stats(dom, flags=0)
     CODE:
       Newx(stats, VIR_DOMAIN_MEMORY_STAT_NR, virDomainMemoryStatStruct);
       if ((got = virDomainMemoryStats(dom, stats, VIR_DOMAIN_MEMORY_STAT_NR, flags)) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       for (i = 0 ; i < got ; i++) {
@@ -2401,12 +3132,47 @@ memory_stats(dom, flags=0)
           case VIR_DOMAIN_MEMORY_STAT_AVAILABLE:
               (void)hv_store (RETVAL, "available", 9, virt_newSVll(stats[i].val), 0);
               break;
+
+          case VIR_DOMAIN_MEMORY_STAT_ACTUAL_BALLOON:
+              (void)hv_store (RETVAL, "actual_balloon", 14, virt_newSVll(stats[i].val), 0);
+              break;
           }
       }
       Safefree(stats);
   OUTPUT:
       RETVAL
 
+
+void
+send_key(dom, codeset, holdtime, keycodesSV, flags=0)
+      virDomainPtr dom;
+      unsigned int codeset;
+      unsigned int holdtime;
+      SV *keycodesSV;
+      unsigned int flags;
+PREINIT:
+      AV *keycodesAV;
+      unsigned int *keycodes;
+      int nkeycodes;
+      int i;
+   PPCODE:
+      if (!SvROK(keycodesSV))
+          return;
+      keycodesAV = (AV*)SvRV(keycodesSV);
+      nkeycodes = av_len(keycodesAV) + 1;
+      Newx(keycodes, nkeycodes, unsigned int);
+
+      for (i = 0 ; i < nkeycodes ; i++) {
+          SV **code = av_fetch(keycodesAV, i, 0);
+          keycodes[i] = SvIV(*code);
+      }
+
+      if (virDomainSendKey(dom, codeset, holdtime, keycodes, nkeycodes, flags) < 0) {
+          Safefree(keycodes);
+          _croak_error(virGetLastError());
+      }
+
+      Safefree(keycodes);
 
 SV *
 block_peek(dom, path, offset, size, flags=0)
@@ -2421,7 +3187,7 @@ block_peek(dom, path, offset, size, flags=0)
       Newx(buf, size, char);
       if (virDomainBlockPeek(dom, path, offset, size, buf, flags) < 0) {
 	Safefree(buf);
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpvn(buf, size);
   OUTPUT:
@@ -2441,7 +3207,7 @@ memory_peek(dom, offset, size, flags=0)
       Newx(buf, size, char);
       if (virDomainMemoryPeek(dom, offset, size, buf, flags) < 0) {
 	Safefree(buf);
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpvn(buf, size);
   OUTPUT:
@@ -2456,7 +3222,7 @@ get_security_label(dom)
       virSecurityLabel seclabel;
     CODE:
       if (virDomainGetSecurityLabel(dom, &seclabel) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "label", 5, newSVpv(seclabel.label, 0), 0);
@@ -2466,8 +3232,9 @@ get_security_label(dom)
 
 
 void
-get_vcpu_info(dom)
+get_vcpu_info(dom, flags=0)
       virDomainPtr dom;
+      unsigned int flags;
  PREINIT:
       virVcpuInfoPtr info;
       unsigned char *cpumaps;
@@ -2478,48 +3245,66 @@ get_vcpu_info(dom)
       int i;
    PPCODE:
       if (virNodeGetInfo(virDomainGetConnect(dom), &nodeinfo) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
       if (virDomainGetInfo(dom, &dominfo) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+	_croak_error(virGetLastError());
       }
 
-      Newx(info, dominfo.nrVirtCpu, virVcpuInfo);
       maplen = VIR_CPU_MAPLEN(VIR_NODEINFO_MAXCPUS(nodeinfo));
       Newx(cpumaps, dominfo.nrVirtCpu * maplen, unsigned char);
-      if ((nvCpus = virDomainGetVcpus(dom, info, dominfo.nrVirtCpu, cpumaps, maplen)) < 0) {
-	Safefree(info);
-	Safefree(cpumaps);
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (flags && (flags & VIR_DOMAIN_AFFECT_CONFIG)) {
+          Newx(info, dominfo.nrVirtCpu, virVcpuInfo);
+          if ((nvCpus = virDomainGetVcpus(dom, info, dominfo.nrVirtCpu, cpumaps, maplen)) < 0) {
+              Safefree(info);
+              Safefree(cpumaps);
+              _croak_error(virGetLastError());
+          }
+      } else {
+          info = NULL;
+          if ((nvCpus = virDomainGetVcpuPinInfo(dom, dominfo.nrVirtCpu, cpumaps, maplen, flags)) < 0) {
+              Safefree(cpumaps);
+              _croak_error(virGetLastError());
+          }
       }
 
       EXTEND(SP, nvCpus);
       for (i = 0 ; i < nvCpus ; i++) {
 	HV *rec = newHV();
-	(void)hv_store(rec, "number", 6, newSViv(info[i].number), 0);
-	(void)hv_store(rec, "state", 5, newSViv(info[i].state), 0);
-	(void)hv_store(rec, "cpuTime", 7, virt_newSVull(info[i].cpuTime), 0);
-	(void)hv_store(rec, "cpu", 3, newSViv(info[i].cpu), 0);
+	(void)hv_store(rec, "number", 6, newSViv(i), 0);
+        if (info) {
+            (void)hv_store(rec, "state", 5, newSViv(info[i].state), 0);
+            (void)hv_store(rec, "cpuTime", 7, virt_newSVull(info[i].cpuTime), 0);
+            (void)hv_store(rec, "cpu", 3, newSViv(info[i].cpu), 0);
+        }
 	(void)hv_store(rec, "affinity", 8, newSVpvn((char*)cpumaps + (i *maplen), maplen), 0);
 	PUSHs(newRV_noinc((SV *)rec));
       }
 
-      Safefree(info);
+      if (info)
+        Safefree(info);
       Safefree(cpumaps);
 
 
 void
-pin_vcpu(dom, vcpu, mask)
+pin_vcpu(dom, vcpu, mask, flags=0)
      virDomainPtr dom;
      unsigned int vcpu;
      SV *mask;
+     unsigned int flags;
 PREINIT:
      STRLEN masklen;
      unsigned char *maps;
  PPCODE:
      maps = (unsigned char *)SvPV(mask, masklen);
-     if (virDomainPinVcpu(dom, vcpu, maps, masklen) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+     if (flags) {
+         if (virDomainPinVcpuFlags(dom, vcpu, maps, masklen, flags) < 0) {
+             _croak_error(virGetLastError());
+         }
+     } else {
+         if (virDomainPinVcpu(dom, vcpu, maps, masklen) < 0) {
+             _croak_error(virGetLastError());
+         }
      }
 
 
@@ -2582,14 +3367,21 @@ current_snapshot(dom, flags=0)
       RETVAL
 
 void
-destroy(dom_rv)
+destroy(dom_rv, flags=0)
       SV *dom_rv;
+      unsigned int flags;
  PREINIT:
       virDomainPtr dom;
   PPCODE:
       dom = (virDomainPtr)SvIV((SV*)SvRV(dom_rv));
-      if (virDomainDestroy(dom) < 0) {
-	_croak_error(virConnGetLastError(virDomainGetConnect(dom)));
+      if (flags) {
+        if (virDomainDestroyFlags(dom, flags) < 0) {
+	  _croak_error(virGetLastError());
+        }
+      } else {
+        if (virDomainDestroy(dom) < 0) {
+	  _croak_error(virGetLastError());
+        }
       }
 
 void
@@ -2614,7 +3406,7 @@ _create_xml(con, xml)
       const char *xml;
     CODE:
       if (!(RETVAL = virNetworkCreateXML(con, xml))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2625,7 +3417,7 @@ _define_xml(con, xml)
       const char *xml;
     CODE:
       if (!(RETVAL = virNetworkDefineXML(con, xml))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2636,7 +3428,7 @@ _lookup_by_name(con, name)
       const char *name;
     CODE:
       if (!(RETVAL = virNetworkLookupByName(con, name))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2647,7 +3439,7 @@ _lookup_by_uuid(con, uuid)
       const unsigned char *uuid;
     CODE:
       if (!(RETVAL = virNetworkLookupByUUID(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2658,7 +3450,7 @@ _lookup_by_uuid_string(con, uuid)
       const char *uuid;
     CODE:
       if (!(RETVAL = virNetworkLookupByUUIDString(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2670,7 +3462,7 @@ get_uuid(net)
       unsigned char rawuuid[VIR_UUID_BUFLEN];
     CODE:
       if ((virNetworkGetUUID(net, rawuuid)) < 0) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv((char*)rawuuid, sizeof(rawuuid));
   OUTPUT:
@@ -2683,7 +3475,7 @@ get_uuid_string(net)
       char uuid[VIR_UUID_STRING_BUFLEN];
     CODE:
       if ((virNetworkGetUUIDString(net, uuid)) < 0) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
 
       RETVAL = newSVpv(uuid, 0);
@@ -2695,7 +3487,7 @@ get_name(net)
       virNetworkPtr net;
     CODE:
       if (!(RETVAL = virNetworkGetName(net))) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2706,7 +3498,7 @@ is_active(net)
       virNetworkPtr net;
     CODE:
       if ((RETVAL = virNetworkIsActive(net)) < 0) {
-          _croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2717,7 +3509,7 @@ is_persistent(net)
       virNetworkPtr net;
     CODE:
       if ((RETVAL = virNetworkIsPersistent(net)) < 0) {
-          _croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2730,7 +3522,7 @@ get_bridge_name(net)
       char *name;
     CODE:
       if (!(name = virNetworkGetBridgeName(net))) {
-	 _croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(name, 0);
       free(name);
@@ -2738,13 +3530,14 @@ get_bridge_name(net)
       RETVAL
 
 SV *
-get_xml_description(net)
+get_xml_description(net, flags=0)
       virNetworkPtr net;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virNetworkGetXMLDesc(net, 0))) {
-	 _croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+      if (!(xml = virNetworkGetXMLDesc(net, flags))) {
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
       free(xml);
@@ -2756,7 +3549,7 @@ undefine(net)
       virNetworkPtr net;
     PPCODE:
       if (virNetworkUndefine(net) < 0) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2764,7 +3557,7 @@ create(net)
       virNetworkPtr net;
     PPCODE:
       if (virNetworkCreate(net) < 0) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2773,7 +3566,7 @@ set_autostart(net, autostart)
       int autostart;
   PPCODE:
       if (virNetworkSetAutostart(net, autostart) < 0) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
 
 
@@ -2784,7 +3577,7 @@ get_autostart(net)
       int autostart;
     CODE:
       if (virNetworkGetAutostart(net, &autostart) < 0) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
       RETVAL = autostart;
   OUTPUT:
@@ -2798,7 +3591,7 @@ destroy(net_rv)
   PPCODE:
       net = (virNetworkPtr)SvIV((SV*)SvRV(net_rv));
       if (virNetworkDestroy(net) < 0) {
-	_croak_error(virConnGetLastError(virNetworkGetConnect(net)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2823,7 +3616,7 @@ _create_xml(con, xml)
       const char *xml;
     CODE:
       if (!(RETVAL = virStoragePoolCreateXML(con, xml, 0))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2834,7 +3627,7 @@ _define_xml(con, xml)
       const char *xml;
     CODE:
       if (!(RETVAL = virStoragePoolDefineXML(con, xml, 0))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2845,7 +3638,7 @@ _lookup_by_name(con, name)
       const char *name;
     CODE:
       if (!(RETVAL = virStoragePoolLookupByName(con, name))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2856,7 +3649,7 @@ _lookup_by_uuid(con, uuid)
       const unsigned char *uuid;
     CODE:
       if (!(RETVAL = virStoragePoolLookupByUUID(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2867,7 +3660,7 @@ _lookup_by_uuid_string(con, uuid)
       const char *uuid;
     CODE:
       if (!(RETVAL = virStoragePoolLookupByUUIDString(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2878,7 +3671,7 @@ _lookup_by_volume(vol)
       virStorageVolPtr vol;
     CODE:
       if (!(RETVAL = virStoragePoolLookupByVolume(vol))) {
-	_croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2891,7 +3684,7 @@ get_uuid(pool)
       unsigned char rawuuid[VIR_UUID_BUFLEN];
     CODE:
       if ((virStoragePoolGetUUID(pool, rawuuid)) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv((char*)rawuuid, sizeof(rawuuid));
   OUTPUT:
@@ -2904,7 +3697,7 @@ get_uuid_string(pool)
       char uuid[VIR_UUID_STRING_BUFLEN];
     CODE:
       if ((virStoragePoolGetUUIDString(pool, uuid)) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
       RETVAL = newSVpv(uuid, 0);
@@ -2916,7 +3709,7 @@ get_name(pool)
       virStoragePoolPtr pool;
     CODE:
       if (!(RETVAL = virStoragePoolGetName(pool))) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2927,7 +3720,7 @@ is_active(pool)
       virStoragePoolPtr pool;
     CODE:
       if ((RETVAL = virStoragePoolIsActive(pool)) < 0) {
-          _croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -2938,20 +3731,21 @@ is_persistent(pool)
       virStoragePoolPtr pool;
     CODE:
       if ((RETVAL = virStoragePoolIsPersistent(pool)) < 0) {
-          _croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
 
 
 SV *
-get_xml_description(pool)
+get_xml_description(pool, flags=0)
       virStoragePoolPtr pool;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virStoragePoolGetXMLDesc(pool, 0))) {
-	 _croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+      if (!(xml = virStoragePoolGetXMLDesc(pool, flags))) {
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
       free(xml);
@@ -2963,7 +3757,7 @@ undefine(pool)
       virStoragePoolPtr pool;
     PPCODE:
       if (virStoragePoolUndefine(pool) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2971,7 +3765,7 @@ create(pool)
       virStoragePoolPtr pool;
     PPCODE:
       if (virStoragePoolCreate(pool, 0) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2980,7 +3774,7 @@ refresh(pool, flags=0)
       int flags;
     PPCODE:
       if (virStoragePoolRefresh(pool, flags) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2989,7 +3783,7 @@ build(pool, flags=0)
       int flags;
     PPCODE:
       if (virStoragePoolBuild(pool, flags) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -2998,7 +3792,7 @@ delete(pool, flags=0)
       int flags;
     PPCODE:
       if (virStoragePoolDelete(pool, flags) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -3007,7 +3801,7 @@ set_autostart(pool, autostart)
       int autostart;
   PPCODE:
       if (virStoragePoolSetAutostart(pool, autostart) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
 
@@ -3018,7 +3812,7 @@ get_autostart(pool)
       int autostart;
     CODE:
       if (virStoragePoolGetAutostart(pool, &autostart) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
       RETVAL = autostart;
   OUTPUT:
@@ -3032,7 +3826,7 @@ get_info(pool)
       virStoragePoolInfo info;
     CODE:
       if (virStoragePoolGetInfo(pool, &info) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "state", 5, newSViv(info.state), 0);
@@ -3050,7 +3844,7 @@ destroy(pool_rv)
   PPCODE:
       pool = (virStoragePoolPtr)SvIV((SV*)SvRV(pool_rv));
       if (virStoragePoolDestroy(pool) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
 
 int
@@ -3058,7 +3852,7 @@ num_of_storage_volumes(pool)
       virStoragePoolPtr pool;
     CODE:
       if ((RETVAL = virStoragePoolNumOfVolumes(pool)) < 0) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3074,7 +3868,7 @@ list_storage_vol_names(pool, maxnames)
       Newx(names, maxnames, char *);
       if ((nnet = virStoragePoolListVolumes(pool, names, maxnames)) < 0) {
 	Safefree(names);
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
       EXTEND(SP, nnet);
       for (i = 0 ; i < nnet ; i++) {
@@ -3107,7 +3901,7 @@ _create_xml(pool, xml, flags=0)
       int flags;
     CODE:
       if (!(RETVAL = virStorageVolCreateXML(pool, xml, flags))) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3120,7 +3914,7 @@ _create_xml_from(pool, xml, clone, flags=0)
       int flags;
     CODE:
       if (!(RETVAL = virStorageVolCreateXMLFrom(pool, xml, clone, flags))) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3131,7 +3925,7 @@ _lookup_by_name(pool, name)
       const char *name;
     CODE:
       if (!(RETVAL = virStorageVolLookupByName(pool, name))) {
-	_croak_error(virConnGetLastError(virStoragePoolGetConnect(pool)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3142,7 +3936,7 @@ _lookup_by_key(con, key)
       const char *key;
     CODE:
       if (!(RETVAL = virStorageVolLookupByKey(con, key))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3153,7 +3947,7 @@ _lookup_by_path(con, path)
       const char *path;
     CODE:
       if (!(RETVAL = virStorageVolLookupByPath(con, path))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3163,7 +3957,7 @@ get_name(vol)
       virStorageVolPtr vol;
     CODE:
       if (!(RETVAL = virStorageVolGetName(vol))) {
-	_croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3174,7 +3968,7 @@ get_key(vol)
       virStorageVolPtr vol;
     CODE:
       if (!(RETVAL = virStorageVolGetKey(vol))) {
-	_croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3185,20 +3979,21 @@ get_path(vol)
       virStorageVolPtr vol;
     CODE:
       if (!(RETVAL = virStorageVolGetPath(vol))) {
-	_croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
 
 
 SV *
-get_xml_description(vol)
+get_xml_description(vol, flags=0)
       virStorageVolPtr vol;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virStorageVolGetXMLDesc(vol, 0))) {
-	 _croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+      if (!(xml = virStorageVolGetXMLDesc(vol, flags))) {
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
       free(xml);
@@ -3211,7 +4006,7 @@ delete(vol, flags=0)
       int flags;
     PPCODE:
       if (virStorageVolDelete(vol, flags) < 0) {
-	_croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -3220,7 +4015,7 @@ wipe(vol, flags=0)
       int flags;
     PPCODE:
       if (virStorageVolWipe(vol, flags) < 0) {
-	_croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+	_croak_error(virGetLastError());
       }
 
 
@@ -3231,7 +4026,7 @@ get_info(vol)
       virStorageVolInfo info;
     CODE:
       if (virStorageVolGetInfo(vol, &info) < 0) {
-	_croak_error(virConnGetLastError(virStorageVolGetConnect(vol)));
+	_croak_error(virGetLastError());
       }
       RETVAL = (HV *)sv_2mortal((SV*)newHV());
       (void)hv_store (RETVAL, "type", 4, newSViv(info.type), 0);
@@ -3239,6 +4034,45 @@ get_info(vol)
       (void)hv_store (RETVAL, "allocation", 10, virt_newSVull(info.allocation), 0);
   OUTPUT:
       RETVAL
+
+
+void
+download(vol, st, offsetsv, lengthsv, flags=0)
+      virStorageVolPtr vol;
+      virStreamPtr st;
+      SV *offsetsv;
+      SV *lengthsv;
+      unsigned int flags;
+ PREINIT:
+      unsigned long long offset;
+      unsigned long long length;
+  PPCODE:
+      offset = virt_SvIVull(offsetsv);
+      length = virt_SvIVull(lengthsv);
+
+      if (virStorageVolDownload(vol, st, offset, length, flags) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+
+void
+upload(vol, st, offsetsv, lengthsv, flags=0)
+      virStorageVolPtr vol;
+      virStreamPtr st;
+      SV *offsetsv;
+      SV *lengthsv;
+      unsigned int flags;
+ PREINIT:
+      unsigned long long offset;
+      unsigned long long length;
+  PPCODE:
+      offset = virt_SvIVull(offsetsv);
+      length = virt_SvIVull(lengthsv);
+
+      if (virStorageVolUpload(vol, st, offset, length, flags) < 0) {
+          _croak_error(virGetLastError());
+      }
+
 
 void
 DESTROY(vol_rv)
@@ -3263,7 +4097,7 @@ _create_xml(con, xml, flags=0)
       unsigned int flags;
     CODE:
       if (!(RETVAL = virNodeDeviceCreateXML(con, xml, flags))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3274,7 +4108,7 @@ _lookup_by_name(con, name)
       const char *name;
     CODE:
       if (!(RETVAL = virNodeDeviceLookupByName(con, name))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3302,12 +4136,13 @@ get_parent(dev)
 
 
 SV *
-get_xml_description(dev)
+get_xml_description(dev, flags=0)
       virNodeDevicePtr dev;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virNodeDeviceGetXMLDesc(dev, 0))) {
+      if (!(xml = virNodeDeviceGetXMLDesc(dev, flags))) {
 	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
@@ -3397,7 +4232,7 @@ _define_xml(con, xml, flags = 0)
       unsigned int flags;
     CODE:
       if (!(RETVAL = virInterfaceDefineXML(con, xml, flags))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3408,7 +4243,7 @@ _lookup_by_name(con, name)
       const char *name;
     CODE:
       if (!(RETVAL = virInterfaceLookupByName(con, name))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3419,7 +4254,7 @@ _lookup_by_mac(con, mac)
       const char *mac;
     CODE:
       if (!(RETVAL = virInterfaceLookupByMACString(con, mac))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3429,7 +4264,7 @@ get_mac(iface)
       virInterfacePtr iface;
     CODE:
       if (!(RETVAL = virInterfaceGetMACString(iface))) {
-	_croak_error(virConnGetLastError(virInterfaceGetConnect(iface)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3439,7 +4274,7 @@ get_name(iface)
       virInterfacePtr iface;
     CODE:
       if (!(RETVAL = virInterfaceGetName(iface))) {
-	_croak_error(virConnGetLastError(virInterfaceGetConnect(iface)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3450,20 +4285,21 @@ is_active(iface)
       virInterfacePtr iface;
     CODE:
       if ((RETVAL = virInterfaceIsActive(iface)) < 0) {
-          _croak_error(virConnGetLastError(virInterfaceGetConnect(iface)));
+          _croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
 
 
 SV *
-get_xml_description(iface)
+get_xml_description(iface, flags=0)
       virInterfacePtr iface;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virInterfaceGetXMLDesc(iface, 0))) {
-	 _croak_error(virConnGetLastError(virInterfaceGetConnect(iface)));
+      if (!(xml = virInterfaceGetXMLDesc(iface, flags))) {
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
       free(xml);
@@ -3475,7 +4311,7 @@ undefine(iface)
       virInterfacePtr iface;
     PPCODE:
       if (virInterfaceUndefine(iface) < 0) {
-	_croak_error(virConnGetLastError(virInterfaceGetConnect(iface)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -3484,7 +4320,7 @@ create(iface, flags=0)
       unsigned int flags;
     PPCODE:
       if (virInterfaceCreate(iface, flags) < 0) {
-	_croak_error(virConnGetLastError(virInterfaceGetConnect(iface)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -3496,7 +4332,7 @@ destroy(iface_rv, flags=0)
   PPCODE:
       iface = (virInterfacePtr)SvIV((SV*)SvRV(iface_rv));
       if (virInterfaceDestroy(iface, flags) < 0) {
-	_croak_error(virConnGetLastError(virInterfaceGetConnect(iface)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -3521,7 +4357,7 @@ _define_xml(con, xml, flags=0)
       unsigned int flags;
     CODE:
       if (!(RETVAL = virSecretDefineXML(con, xml, flags))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3533,7 +4369,7 @@ _lookup_by_usage(con, usageType, usageID)
       const char *usageID;
     CODE:
       if (!(RETVAL = virSecretLookupByUsage(con, usageType, usageID))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3544,7 +4380,7 @@ _lookup_by_uuid(con, uuid)
       const unsigned char *uuid;
     CODE:
       if (!(RETVAL = virSecretLookupByUUID(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3555,7 +4391,7 @@ _lookup_by_uuid_string(con, uuid)
       const char *uuid;
     CODE:
       if (!(RETVAL = virSecretLookupByUUIDString(con, uuid))) {
-	_croak_error(virConnGetLastError(con));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3567,7 +4403,7 @@ get_uuid(sec)
       unsigned char rawuuid[VIR_UUID_BUFLEN];
     CODE:
       if ((virSecretGetUUID(sec, rawuuid)) < 0) {
-	_croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv((char*)rawuuid, sizeof(rawuuid));
   OUTPUT:
@@ -3580,7 +4416,7 @@ get_uuid_string(sec)
       char uuid[VIR_UUID_STRING_BUFLEN];
     CODE:
       if ((virSecretGetUUIDString(sec, uuid)) < 0) {
-	_croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+	_croak_error(virGetLastError());
       }
 
       RETVAL = newSVpv(uuid, 0);
@@ -3592,7 +4428,7 @@ get_usage_id(sec)
       virSecretPtr sec;
     CODE:
       if (!(RETVAL = virSecretGetUsageID(sec))) {
-	_croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
@@ -3603,20 +4439,21 @@ get_usage_type(sec)
       virSecretPtr sec;
     CODE:
       if (!(RETVAL = virSecretGetUsageType(sec))) {
-	_croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+	_croak_error(virGetLastError());
       }
   OUTPUT:
       RETVAL
 
 
 SV *
-get_xml_description(sec)
+get_xml_description(sec, flags=0)
       virSecretPtr sec;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virSecretGetXMLDesc(sec, 0))) {
-	 _croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+      if (!(xml = virSecretGetXMLDesc(sec, flags))) {
+	 _croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
       free(xml);
@@ -3628,7 +4465,7 @@ undefine(sec)
       virSecretPtr sec;
     PPCODE:
       if (virSecretUndefine(sec) < 0) {
-	_croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+	_croak_error(virGetLastError());
       }
 
 void
@@ -3642,7 +4479,7 @@ PREINIT:
  PPCODE:
       bytes = (unsigned char *)SvPV(value, len);
       if (virSecretSetValue(sec, bytes, len, flags) < 0) {
-        _croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+        _croak_error(virGetLastError());
       }
 
 
@@ -3655,7 +4492,7 @@ PREINIT:
       size_t len;
     CODE:
       if ((bytes = virSecretGetValue(sec, &len, flags)) == NULL) {
-	_croak_error(virConnGetLastError(virSecretGetConnect(sec)));
+	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv((char*)bytes, len);
   OUTPUT:
@@ -3761,12 +4598,13 @@ get_name(filter)
 
 
 SV *
-get_xml_description(filter)
+get_xml_description(filter, flags=0)
       virNWFilterPtr filter;
+      unsigned int flags;
   PREINIT:
       char *xml;
     CODE:
-      if (!(xml = virNWFilterGetXMLDesc(filter, 0))) {
+      if (!(xml = virNWFilterGetXMLDesc(filter, flags))) {
 	_croak_error(virGetLastError());
       }
       RETVAL = newSVpv(xml, 0);
@@ -3886,6 +4724,84 @@ _register_impl()
 			   _event_remove_timeout);
 
 void
+register_default()
+  PPCODE:
+      virEventRegisterDefaultImpl();
+
+void
+run_default()
+  PPCODE:
+      virEventRunDefaultImpl();
+
+
+int
+add_handle(fd, events, coderef)
+      int fd;
+      int events;
+      SV *coderef;
+PREINIT:
+      int watch;
+  CODE:
+      SvREFCNT_inc(coderef);
+
+      if ((watch = virEventAddHandle(fd, events, _event_handle_helper, coderef, _event_cb_free)) < 0) {
+          SvREFCNT_dec(coderef);
+          _croak_error(virGetLastError());
+      }
+      RETVAL = watch;
+ OUTPUT:
+      RETVAL
+
+void
+update_handle(watch, events)
+      int watch;
+      int events;
+  PPCODE:
+      virEventUpdateHandle(watch, events);
+
+void
+remove_handle(watch)
+      int watch;
+  PPCODE:
+      if (virEventRemoveHandle(watch) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+
+int
+add_timeout(frequency, coderef)
+      int frequency;
+      SV *coderef;
+PREINIT:
+      int timer;
+  CODE:
+      SvREFCNT_inc(coderef);
+
+      if ((timer = virEventAddTimeout(frequency, _event_timeout_helper, coderef, _event_cb_free)) < 0) {
+          SvREFCNT_dec(coderef);
+          _croak_error(virGetLastError());
+      }
+      RETVAL = timer;
+ OUTPUT:
+      RETVAL
+
+void
+update_timeout(timer, frequency)
+      int timer;
+      int frequency;
+  PPCODE:
+      virEventUpdateTimeout(timer, frequency);
+
+void
+remove_timeout(timer)
+      int timer;
+  PPCODE:
+      if (virEventRemoveTimeout(timer) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+
+void
 _run_handle_callback_helper(watch, fd, event, cbref, opaqueref)
       int watch;
       int fd;
@@ -3933,6 +4849,182 @@ PREINIT:
 
 
 
+MODULE = Sys::Virt::Stream  PACKAGE = Sys::Virt::Stream
+
+virStreamPtr
+_new_obj(con, flags=0)
+      virConnectPtr con;
+      unsigned int flags;
+    CODE:
+      if (!(RETVAL = virStreamNew(con, flags))) {
+	_croak_error(virGetLastError());
+      }
+  OUTPUT:
+      RETVAL
+
+int
+send(st, data, nbytes)
+      virStreamPtr st;
+      SV *data;
+      size_t nbytes;
+ PREINIT:
+      const char *rawdata;
+      STRLEN len;
+    CODE:
+      if (SvOK(data)) {
+	  rawdata = SvPV(data, len);
+          if (nbytes < 0 || nbytes > len)
+              nbytes = len;
+      } else {
+          rawdata = "";
+          nbytes = 0;
+      }
+
+      if ((RETVAL = virStreamSend(st, rawdata, nbytes)) < 0 &&
+          RETVAL != -2) {
+          _croak_error(virGetLastError());
+      }
+  OUTPUT:
+      RETVAL
+
+
+int
+recv(st, data, nbytes)
+      virStreamPtr st;
+      SV *data;
+      size_t nbytes;
+ PREINIT:
+      char *rawdata;
+    CODE:
+      Newx(rawdata, nbytes, char);
+      if ((RETVAL = virStreamRecv(st, rawdata, nbytes)) < 0 &&
+          RETVAL != -2) {
+          Safefree(rawdata);
+          _croak_error(virGetLastError());
+      }
+      if (RETVAL > 0) {
+          sv_setpvn(data, rawdata, RETVAL);
+      }
+      Safefree(rawdata);
+  OUTPUT:
+      RETVAL
+
+
+void
+send_all(stref, handler)
+      SV *stref;
+      SV *handler;
+ PREINIT:
+      AV *opaque;
+      virStreamPtr st;
+    CODE:
+      st = (virStreamPtr)SvIV((SV*)SvRV(stref));
+
+      opaque = newAV();
+      SvREFCNT_inc(handler);
+      SvREFCNT_inc(stref);
+      av_push(opaque, stref);
+      av_push(opaque, handler);
+
+      if (virStreamSendAll(st, _stream_send_all_source, opaque) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+      SvREFCNT_dec(opaque);
+
+
+void
+recv_all(stref, handler)
+      SV *stref;
+      SV *handler;
+ PREINIT:
+      AV *opaque;
+      virStreamPtr st;
+    CODE:
+      st = (virStreamPtr)SvIV((SV*)SvRV(stref));
+
+      opaque = newAV();
+      SvREFCNT_inc(handler);
+      SvREFCNT_inc(stref);
+      av_push(opaque, stref);
+      av_push(opaque, handler);
+
+      if (virStreamRecvAll(st, _stream_recv_all_sink, opaque) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+      SvREFCNT_dec(opaque);
+
+
+void
+add_callback(stref, events, cb)
+      SV* stref;
+      int events;
+      SV* cb;
+ PREINIT:
+      AV *opaque;
+      virStreamPtr st;
+  PPCODE:
+      st = (virStreamPtr)SvIV((SV*)SvRV(stref));
+
+      opaque = newAV();
+      SvREFCNT_inc(cb);
+      SvREFCNT_inc(stref);
+      av_push(opaque, stref);
+      av_push(opaque, cb);
+      if (virStreamEventAddCallback(st, events, _stream_event_callback, opaque, _stream_event_free) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+
+void
+update_callback(st, events)
+      virStreamPtr st;
+      int events;
+   PPCODE:
+      if (virStreamEventUpdateCallback(st, events) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+
+void
+remove_callback(st)
+      virStreamPtr st;
+   PPCODE:
+      if (virStreamEventRemoveCallback(st) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+
+void
+finish(st)
+      virStreamPtr st;
+  PPCODE:
+      if (virStreamFinish(st) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+void
+abort(st)
+      virStreamPtr st;
+  PPCODE:
+      if (virStreamAbort(st) < 0) {
+          _croak_error(virGetLastError());
+      }
+
+void
+DESTROY(st_rv)
+      SV *st_rv;
+ PREINIT:
+      virStreamPtr st;
+  PPCODE:
+      st = (virStreamPtr)SvIV((SV*)SvRV(st_rv));
+      if (st) {
+	virStreamFree(st);
+	sv_setiv((SV*)SvRV(st_rv), 0);
+      }
+
+
 MODULE = Sys::Virt  PACKAGE = Sys::Virt
 
 
@@ -3944,6 +5036,7 @@ BOOT:
       HV *stash;
 
       virSetErrorFunc(NULL, ignoreVirErrorFunc);
+      virInitialize();
 
       stash = gv_stashpv( "Sys::Virt", TRUE );
 
@@ -3985,7 +5078,54 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF, STATE_SHUTOFF);
       REGISTER_CONSTANT(VIR_DOMAIN_CRASHED, STATE_CRASHED);
 
+      REGISTER_CONSTANT(VIR_DUMP_CRASH, DUMP_CRASH);
+      REGISTER_CONSTANT(VIR_DUMP_LIVE, DUMP_LIVE);
+      REGISTER_CONSTANT(VIR_DUMP_BYPASS_CACHE, DUMP_BYPASS_CACHE);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_SAVE_BYPASS_CACHE, SAVE_BYPASS_CACHE);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_UNDEFINE_MANAGED_SAVE, UNDEFINE_MANAGED_SAVE);
+
       REGISTER_CONSTANT(VIR_DOMAIN_START_PAUSED, START_PAUSED);
+      REGISTER_CONSTANT(VIR_DOMAIN_START_AUTODESTROY, START_AUTODESTROY);
+      REGISTER_CONSTANT(VIR_DOMAIN_START_BYPASS_CACHE, START_BYPASS_CACHE);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_NOSTATE_UNKNOWN, STATE_NOSTATE_UNKNOWN);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_UNKNOWN, STATE_RUNNING_UNKNOWN);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_BOOTED, STATE_RUNNING_BOOTED);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_MIGRATED, STATE_RUNNING_MIGRATED);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_RESTORED, STATE_RUNNING_RESTORED);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_FROM_SNAPSHOT, STATE_RUNNING_FROM_SNAPSHOT);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_UNPAUSED, STATE_RUNNING_UNPAUSED);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_MIGRATION_CANCELED, STATE_RUNNING_MIGRATION_CANCELED);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_SAVE_CANCELED, STATE_RUNNING_SAVE_CANCELED);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_BLOCKED_UNKNOWN, STATE_RUNNING_UNKNOWN);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_UNKNOWN, STATE_PAUSED_UNKNOWN);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_USER, STATE_PAUSED_USER);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_MIGRATION, STATE_PAUSED_MIGRATION);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_SAVE, STATE_PAUSED_SAVE);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_DUMP, STATE_PAUSED_DUMP);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_IOERROR, STATE_PAUSED_IOERROR);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_WATCHDOG, STATE_PAUSED_WATCHDOG);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_FROM_SNAPSHOT, STATE_PAUSED_FROM_SNAPSHOT);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTDOWN_UNKNOWN, STATE_SHUTDOWN_UNKNOWN);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTDOWN_USER, STATE_SHUTDOWN_USER);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_UNKNOWN, STATE_SHUTOFF_UNKNOWN);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_SHUTDOWN, STATE_SHUTOFF_SHUTDOWN);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_DESTROYED, STATE_SHUTOFF_DESTROYED);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_CRASHED, STATE_SHUTOFF_CRASHED);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_MIGRATED, STATE_SHUTOFF_MIGRATED);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_SAVED, STATE_SHUTOFF_SAVED);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_FAILED, STATE_SHUTOFF_FAILED);
+      REGISTER_CONSTANT(VIR_DOMAIN_SHUTOFF_FROM_SNAPSHOT, STATE_SHUTOFF_FROM_SNAPSHOT);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_CRASHED_UNKNOWN, STATE_CRASHED_UNKNOWN);
+
 
       /* NB: skip VIR_DOMAIN_SCHED_FIELD_* constants, because
          those are not used from Perl code - handled internally
@@ -3997,6 +5137,9 @@ BOOT:
       REGISTER_CONSTANT(VIR_MIGRATE_PERSIST_DEST, MIGRATE_PERSIST_DEST);
       REGISTER_CONSTANT(VIR_MIGRATE_UNDEFINE_SOURCE, MIGRATE_UNDEFINE_SOURCE);
       REGISTER_CONSTANT(VIR_MIGRATE_PAUSED, MIGRATE_PAUSED);
+      REGISTER_CONSTANT(VIR_MIGRATE_NON_SHARED_DISK, MIGRATE_NON_SHARED_DISK);
+      REGISTER_CONSTANT(VIR_MIGRATE_NON_SHARED_INC, MIGRATE_NON_SHARED_INC);
+      REGISTER_CONSTANT(VIR_MIGRATE_CHANGE_PROTECTION, MIGRATE_CHANGE_PROTECTION);
 
 
       REGISTER_CONSTANT(VIR_DOMAIN_XML_SECURE, XML_SECURE);
@@ -4007,6 +5150,17 @@ BOOT:
       REGISTER_CONSTANT(VIR_VCPU_OFFLINE, VCPU_OFFLINE);
       REGISTER_CONSTANT(VIR_VCPU_RUNNING, VCPU_RUNNING);
       REGISTER_CONSTANT(VIR_VCPU_BLOCKED, VCPU_BLOCKED);
+
+
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_LINUX, KEYCODE_SET_LINUX);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_LINUX, KEYCODE_SET_XT);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_ATSET1, KEYCODE_SET_ATSET1);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_ATSET2, KEYCODE_SET_ATSET2);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_ATSET3, KEYCODE_SET_ATSET3);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_OSX, KEYCODE_SET_OSX);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_XT_KBD, KEYCODE_SET_XT_KBD);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_USB, KEYCODE_SET_USB);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_WIN32, KEYCODE_SET_WIN32);
 
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_DEFINED, EVENT_DEFINED);
@@ -4039,9 +5193,24 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_STOPPED_FAILED, EVENT_STOPPED_FAILED);
 
 
+      REGISTER_CONSTANT(VIR_DOMAIN_CONTROL_OK, CONTROL_OK);
+      REGISTER_CONSTANT(VIR_DOMAIN_CONTROL_JOB, CONTROL_JOB);
+      REGISTER_CONSTANT(VIR_DOMAIN_CONTROL_OCCUPIED, CONTROL_OCCUPIED);
+      REGISTER_CONSTANT(VIR_DOMAIN_CONTROL_ERROR, CONTROL_ERROR);
+
+
       REGISTER_CONSTANT(VIR_DOMAIN_DEVICE_MODIFY_CURRENT, DEVICE_MODIFY_CURRENT);
       REGISTER_CONSTANT(VIR_DOMAIN_DEVICE_MODIFY_LIVE, DEVICE_MODIFY_LIVE);
       REGISTER_CONSTANT(VIR_DOMAIN_DEVICE_MODIFY_CONFIG, DEVICE_MODIFY_CONFIG);
+
+
+      REGISTER_CONSTANT(VIR_DOMAIN_MEM_LIVE, MEM_LIVE);
+      REGISTER_CONSTANT(VIR_DOMAIN_MEM_CONFIG, MEM_CONFIG);
+
+
+      REGISTER_CONSTANT(VIR_DOMAIN_AFFECT_CURRENT, AFFECT_CURRENT);
+      REGISTER_CONSTANT(VIR_DOMAIN_AFFECT_LIVE, AFFECT_LIVE);
+      REGISTER_CONSTANT(VIR_DOMAIN_AFFECT_CONFIG, AFFECT_CONFIG);
 
 
       REGISTER_CONSTANT(VIR_DOMAIN_JOB_NONE, JOB_NONE);
@@ -4051,6 +5220,12 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_JOB_FAILED, JOB_FAILED);
       REGISTER_CONSTANT(VIR_DOMAIN_JOB_CANCELLED, JOB_CANCELLED);
 
+      REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_JOB_TYPE_UNKNOWN, BLOCK_JOB_TYPE_UNKNOWN);
+      REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_JOB_TYPE_PULL, BLOCK_JOB_TYPE_PULL);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_JOB_COMPLETED, BLOCK_JOB_COMPLETED);
+      REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_JOB_FAILED, BLOCK_JOB_FAILED);
+
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_LIFECYCLE, EVENT_ID_LIFECYCLE);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_REBOOT, EVENT_ID_REBOOT);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_RTC_CHANGE, EVENT_ID_RTC_CHANGE);
@@ -4058,6 +5233,8 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_IO_ERROR, EVENT_ID_IO_ERROR);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_GRAPHICS, EVENT_ID_GRAPHICS);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_IO_ERROR_REASON, EVENT_ID_IO_ERROR_REASON);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_CONTROL_ERROR, EVENT_ID_CONTROL_ERROR);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_BLOCK_JOB, EVENT_ID_BLOCK_JOB);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_WATCHDOG_NONE, EVENT_WATCHDOG_NONE);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_WATCHDOG_PAUSE, EVENT_WATCHDOG_PAUSE);
@@ -4078,13 +5255,15 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_GRAPHICS_ADDRESS_IPV6, EVENT_GRAPHICS_ADDRESS_IPV6);
 
 
-      REGISTER_CONSTANT_ULL(VIR_DOMAIN_MEMORY_PARAM_UNLIMITED, MEMORY_PARAM_UNLIMITED);
-
       REGISTER_CONSTANT_STR(VIR_DOMAIN_MEMORY_HARD_LIMIT, MEMORY_HARD_LIMIT);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_MEMORY_SOFT_LIMIT, MEMORY_SOFT_LIMIT);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_MEMORY_MIN_GUARANTEE, MEMORY_MIN_GUARANTEE);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_MEMORY_SWAP_HARD_LIMIT, MEMORY_SWAP_HARD_LIMIT);
+      REGISTER_CONSTANT_ULL(VIR_DOMAIN_MEMORY_PARAM_UNLIMITED, MEMORY_PARAM_UNLIMITED);
 
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_BLKIO_WEIGHT, BLKIO_WEIGHT);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_VCPU_CURRENT, VCPU_CURRENT);
       REGISTER_CONSTANT(VIR_DOMAIN_VCPU_LIVE, VCPU_LIVE);
       REGISTER_CONSTANT(VIR_DOMAIN_VCPU_CONFIG, VCPU_CONFIG);
 
@@ -4115,6 +5294,16 @@ BOOT:
       stash = gv_stashpv( "Sys::Virt::Secret", TRUE );
       REGISTER_CONSTANT(VIR_SECRET_USAGE_TYPE_NONE, USAGE_TYPE_NONE);
       REGISTER_CONSTANT(VIR_SECRET_USAGE_TYPE_VOLUME, USAGE_TYPE_VOLUME);
+
+
+
+      stash = gv_stashpv( "Sys::Virt::Stream", TRUE );
+      REGISTER_CONSTANT(VIR_STREAM_NONBLOCK, NONBLOCK);
+
+      REGISTER_CONSTANT(VIR_STREAM_EVENT_READABLE, EVENT_READABLE);
+      REGISTER_CONSTANT(VIR_STREAM_EVENT_WRITABLE, EVENT_WRITABLE);
+      REGISTER_CONSTANT(VIR_STREAM_EVENT_ERROR, EVENT_ERROR);
+      REGISTER_CONSTANT(VIR_STREAM_EVENT_HANGUP, EVENT_HANGUP);
 
 
 
@@ -4150,7 +5339,18 @@ BOOT:
       REGISTER_CONSTANT(VIR_FROM_ESX, FROM_ESX);
       REGISTER_CONSTANT(VIR_FROM_PHYP, FROM_PHYP);
       REGISTER_CONSTANT(VIR_FROM_SECRET, FROM_SECRET);
-
+      REGISTER_CONSTANT(VIR_FROM_CPU, FROM_CPU);
+      REGISTER_CONSTANT(VIR_FROM_XENAPI, FROM_XENAPI);
+      REGISTER_CONSTANT(VIR_FROM_NWFILTER, FROM_NWFILTER);
+      REGISTER_CONSTANT(VIR_FROM_HOOK, FROM_HOOK);
+      REGISTER_CONSTANT(VIR_FROM_DOMAIN_SNAPSHOT, FROM_DOMAIN_SNAPSHOT);
+      REGISTER_CONSTANT(VIR_FROM_AUDIT, FROM_AUDIT);
+      REGISTER_CONSTANT(VIR_FROM_SYSINFO, FROM_SYSINFO);
+      REGISTER_CONSTANT(VIR_FROM_STREAMS, FROM_STREAMS);
+      REGISTER_CONSTANT(VIR_FROM_VMWARE, FROM_VMWARE);
+      REGISTER_CONSTANT(VIR_FROM_EVENT, FROM_EVENT);
+      REGISTER_CONSTANT(VIR_FROM_LIBXL, FROM_LIBXL);
+      REGISTER_CONSTANT(VIR_FROM_LOCKING, FROM_LOCKING);
 
 
       REGISTER_CONSTANT(VIR_ERR_OK, ERR_OK);
@@ -4219,4 +5419,9 @@ BOOT:
       REGISTER_CONSTANT(VIR_ERR_CONFIG_UNSUPPORTED, ERR_CONFIG_UNSUPPORTED);
       REGISTER_CONSTANT(VIR_ERR_OPERATION_TIMEOUT, ERR_OPERATION_TIMEOUT);
       REGISTER_CONSTANT(VIR_ERR_MIGRATE_PERSIST_FAILED, ERR_MIGRATE_PERSIST_FAILED);
+      REGISTER_CONSTANT(VIR_ERR_HOOK_SCRIPT_FAILED, ERR_HOOK_SCRIPT_FAILED);
+      REGISTER_CONSTANT(VIR_ERR_INVALID_DOMAIN_SNAPSHOT, ERR_INVALID_DOMAIN_SNAPSHOT);
+      REGISTER_CONSTANT(VIR_ERR_NO_DOMAIN_SNAPSHOT, ERR_NO_DOMAIN_SNAPSHOT);
+      REGISTER_CONSTANT(VIR_ERR_INVALID_STREAM, ERR_INVALID_STREAM);
+      REGISTER_CONSTANT(VIR_ERR_ARGUMENT_UNSUPPORTED, ERR_ARGUMENT_UNSUPPORTED);
     }

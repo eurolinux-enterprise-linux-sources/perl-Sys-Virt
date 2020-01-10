@@ -1,20 +1,19 @@
 Name:           perl-Sys-Virt
-Version:        0.2.5
-Release:        1%{?dist}
+Version:        0.9.4
+Release:        2%{?dist}
 Summary:        Represent and manage a libvirt hypervisor connection
 License:        GPLv2+ or Artistic
 Group:          Development/Libraries
 URL:            http://search.cpan.org/dist/Sys-Virt/
 Source0:        http://www.cpan.org/authors/id/D/DA/DANBERR/Sys-Virt-%{version}.tar.gz
-Patch1:         Sys-Virt-%{version}-mem-unlimited.patch
-Patch2:         Sys-Virt-%{version}-hostname.patch
+Patch1:         Sys-Virt-%{version}-abort-job.patch
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildRequires:  perl(ExtUtils::MakeMaker)
 BuildRequires:  perl(Test::Pod)
 BuildRequires:  perl(Test::Pod::Coverage)
 BuildRequires:  perl(XML::XPath)
 BuildRequires:  perl(Time::HiRes)
-BuildRequires:  libvirt-devel >= 0.8.7
+BuildRequires:  libvirt-devel >= 0.9.4
 Requires:       perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
 
 %description
@@ -25,7 +24,6 @@ virtualization containers to be managed with a consistent API.
 %prep
 %setup -q -n Sys-Virt-%{version}
 %patch1 -p1
-%patch2 -p1
 
 sed -i -e '/Sys-Virt\.spec/d' Makefile.PL
 sed -i -e '/\.spec\.PL$/d' MANIFEST
@@ -60,6 +58,22 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man3/*
 
 %changelog
+* Wed Aug  3 2011 Daniel P. Berrange <berrange@redhat.com> - 0.9.4-2
+- Re-add virDomainAbortJob API binding accidentally removed (rhbz #717887)
+
+* Wed Aug  3 2011 Daniel P. Berrange <berrange@redhat.com> - 0.9.4-1
+- Update to 0.9.4 release (rhbz #717887)
+
+* Wed Jul 13 2011 Daniel P. Berrange <berrange@redhat.com> - 0.9.3-1
+- Update to 0.9.3 release (rhbz #717887)
+
+* Mon Jul 11 2011 Daniel P. Berrange <berrange@redhat.com> - 0.9.2-1
+- Update to 0.9.2 release (rhbz #717887)
+
+* Thu Jun 30 2011 Daniel P. Berrange <berrange@redhat.com> - 0.2.8-1
+- Update to 0.2.8 release (rhbz #717887)
+- Fixes missing VIR_DOMAIN_XML_SECURE binding (rhbz #705792)
+
 * Fri Feb  4 2011 Daniel P. Berrange <berrange@redhat.com> - 0.2.5-1
 - Update to 0.2.5 release (rhbz #675120)
 
