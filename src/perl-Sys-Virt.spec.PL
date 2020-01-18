@@ -6,15 +6,19 @@ use strict;
 
 die unless (scalar @ARGV == 1);
 
-unless (do './lib/Sys/Virt.pm')
-  {
-    if ($@) { die $@ };
-    die "lib/Sys/Virt.pm: $!";
-  }
+open PM, './lib/Sys/Virt.pm' or die "lib/Sys/Virt.pm: $!";
+my $ver;
+while (<PM>) {
+    if (/our \$VERSION = '(.*)'/) {
+        $ver = $1;
+	last;
+    }
+}
+die "cannot find version" unless $ver;
 
 local $/ = undef;
 $_ = <DATA>;
-s/\@VERSION\@/$Sys::Virt::VERSION/g;
+s/\@VERSION\@/$ver/g;
 
 open SPEC, ">$ARGV[0]" or die "$!";
 print SPEC $_;
@@ -24,21 +28,43 @@ __DATA__
 
 Name:           perl-Sys-Virt
 Version:        @VERSION@
-Release:        1%{?dist}%{?extra_release}
+Release:        1%{?dist}
 Summary:        Represent and manage a libvirt hypervisor connection
 License:        GPLv2+ or Artistic
-Group:          Development/Libraries
-URL:            http://search.cpan.org/dist/Sys-Virt/
-Source0:        http://www.cpan.org/authors/id/D/DA/DANBERR/Sys-Virt-%{version}.tar.gz
+URL:            https://metacpan.org/release/Sys-Virt
+Source0:        https://cpan.metacpan.org/authors/id/D/DA/DANBERR/Sys-Virt-v%{version}.tar.gz
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-BuildRequires:  perl(ExtUtils::MakeMaker)
-BuildRequires:  perl(Test::Pod)
-BuildRequires:  perl(Test::Pod::Coverage)
-BuildRequires:  perl(Test::CPAN::Changes)
-BuildRequires:  perl(XML::XPath)
-BuildRequires:  perl(Time::HiRes)
+# Build
+BuildRequires:  coreutils
+BuildRequires:  findutils
+BuildRequires:  gcc
 BuildRequires:  libvirt-devel >= %{version}
-Requires:       perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
+BuildRequires:  make
+BuildRequires:  perl-devel
+%if 0%{?fedora} || 0%{?rhel} > 7
+BuildRequires:  perl-interpreter
+BuildRequires:  perl-generators
+%endif
+BuildRequires:  perl(ExtUtils::CBuilder)
+BuildRequires:  perl(Module::Build)
+BuildRequires:  sed
+# Runtime
+BuildRequires:  perl(overload)
+BuildRequires:  perl(strict)
+BuildRequires:  perl(warnings)
+BuildRequires:  perl(XSLoader)
+# Tests only
+BuildRequires:  perl(base)
+BuildRequires:  perl(Sys::Hostname)
+BuildRequires:  perl(Test::More)
+BuildRequires:  perl(Time::HiRes)
+BuildRequires:  perl(XML::XPath)
+BuildRequires:  perl(XML::XPath::XMLParser)
+# Optional tests only
+BuildRequires:  perl(Test::CPAN::Changes)
+BuildRequires:  perl(Test::Pod) >= 1.00
+BuildRequires:  perl(Test::Pod::Coverage) >= 1.00
+Requires:       perl(:MODULE_COMPAT_%(eval "$(perl -V:version)"; echo $version))
 
 %description
 The Sys::Virt module provides a Perl XS binding to the libvirt virtual
@@ -46,36 +72,24 @@ machine management APIs. This allows machines running within arbitrary
 virtualization containers to be managed with a consistent API.
 
 %prep
-%setup -q -n Sys-Virt-%{version}
+%setup -q -n Sys-Virt-v%{version}
 
-sed -i -e '/Sys-Virt\.spec/d' Makefile.PL
-sed -i -e '/\.spec\.PL$/d' MANIFEST
-rm -f *.spec.PL
 
 %build
-%{__perl} Makefile.PL INSTALLDIRS=vendor OPTIMIZE="$RPM_OPT_FLAGS"
-make %{?_smp_mflags}
+%{__perl} Build.PL installdirs=vendor
+./Build
 
 %install
-rm -rf $RPM_BUILD_ROOT
-
-make pure_install PERL_INSTALL_ROOT=$RPM_BUILD_ROOT
-
-find $RPM_BUILD_ROOT -type f \( -name .packlist -o -name '*.bs' -empty \) |
-	xargs rm -f
-find $RPM_BUILD_ROOT -depth -type d -empty -exec rmdir {} \;
+./Build install destdir=$RPM_BUILD_ROOT create_packlist=0
 
 %{_fixperms} $RPM_BUILD_ROOT/*
 
 %check
-make test
-
-%clean
-rm -rf $RPM_BUILD_ROOT
+./Build test
 
 %files
-%defattr(-,root,root,-)
-%doc AUTHORS Changes LICENSE README examples/
+%license LICENSE
+%doc AUTHORS Changes README examples/
 %{perl_vendorarch}/auto/*
 %{perl_vendorarch}/Sys*
 %{_mandir}/man3/*

@@ -2398,6 +2398,23 @@ get_node_security_model(con)
    OUTPUT:
       RETVAL
 
+HV *
+get_node_sev_info(conn, flags=0)
+      virConnectPtr conn;
+      unsigned int flags;
+  PREINIT:
+      virTypedParameterPtr params;
+      int nparams;
+    CODE:
+      if (virNodeGetSEVInfo(conn, &params, &nparams, flags) < 0) {
+          _croak_error();
+      }
+
+      RETVAL = vir_typed_param_to_hv(params, nparams);
+      free(params);
+  OUTPUT:
+      RETVAL
+
 void
 get_node_cpu_map(con, flags=0)
       virConnectPtr con;
@@ -2763,6 +2780,38 @@ PREINIT:
 
 
 SV *
+compare_hypervisor_cpu(con, emulatorsv, archsv, machinesv, virttypesv, xml, flags=0)
+      virConnectPtr con;
+      SV *emulatorsv;
+      SV *archsv;
+      SV *machinesv;
+      SV *virttypesv;
+      char *xml;
+      unsigned int flags;
+PREINIT:
+      char *emulator = NULL;
+      char *arch = NULL;
+      char *machine = NULL;
+      char *virttype = NULL;
+      int rc;
+   CODE:
+      if (SvOK(emulatorsv))
+	  emulator = SvPV_nolen(emulatorsv);
+      if (SvOK(archsv))
+	  arch = SvPV_nolen(archsv);
+      if (SvOK(machinesv))
+	  machine = SvPV_nolen(machinesv);
+      if (SvOK(virttypesv))
+	  virttype = SvPV_nolen(virttypesv);
+      if ((rc = virConnectCompareHypervisorCPU(con, emulator, arch, machine, virttype, xml, flags)) < 0)
+          _croak_error();
+
+      RETVAL = newSViv(rc);
+  OUTPUT:
+      RETVAL
+
+
+SV *
 baseline_cpu(con, xml, flags=0)
       virConnectPtr con;
       SV *xml;
@@ -2783,6 +2832,54 @@ PREINIT:
       }
 
       if (!(retxml = virConnectBaselineCPU(con, xmlstr, xmllen, flags))) {
+          Safefree(xmlstr);
+          _croak_error();
+      }
+
+      Safefree(xmlstr);
+      RETVAL = newSVpv(retxml, 0);
+      free(retxml);
+  OUTPUT:
+      RETVAL
+
+SV *
+baseline_hypervisor_cpu(con, emulatorsv, archsv, machinesv, virttypesv, xml, flags=0)
+      virConnectPtr con;
+      SV *emulatorsv;
+      SV *archsv;
+      SV *machinesv;
+      SV *virttypesv;
+      SV *xml;
+      unsigned int flags;
+PREINIT:
+      char *emulator = NULL;
+      char *arch = NULL;
+      char *machine = NULL;
+      char *virttype = NULL;
+      AV *xmllist;
+      const char **xmlstr;
+      int xmllen;
+      int i;
+      char *retxml;
+   CODE:
+      if (SvOK(emulatorsv))
+	  emulator = SvPV_nolen(emulatorsv);
+      if (SvOK(archsv))
+	  arch = SvPV_nolen(archsv);
+      if (SvOK(machinesv))
+	  machine = SvPV_nolen(machinesv);
+      if (SvOK(virttypesv))
+	  virttype = SvPV_nolen(virttypesv);
+      xmllist = (AV*)SvRV(xml);
+      xmllen = av_len(xmllist) + 1;
+      Newx(xmlstr, xmllen, const char *);
+      for (i = 0 ; i < xmllen ; i++) {
+          SV **doc = av_fetch(xmllist, i, 0);
+          xmlstr[i] = SvPV_nolen(*doc);
+      }
+
+      if (!(retxml = virConnectBaselineHypervisorCPU(con, emulator, arch, machine, virttype,
+						     xmlstr, xmllen, flags))) {
           Safefree(xmlstr);
           _croak_error();
       }
@@ -2964,6 +3061,27 @@ list_all_nwfilters(con, flags=0)
           PUSHs(nwfilterrv);
       }
       free(nwfilters);
+
+
+void
+list_all_nwfilter_bindings(con, flags=0)
+      virConnectPtr con;
+      unsigned int flags;
+ PREINIT:
+      virNWFilterBindingPtr *bindings;
+      int i, nbinding;
+      SV *bindingrv;
+  PPCODE:
+      if ((nbinding = virConnectListAllNWFilterBindings(con, &bindings, flags)) < 0)
+          _croak_error();
+
+      EXTEND(SP, nbinding);
+      for (i = 0 ; i < nbinding ; i++) {
+          bindingrv = sv_newmortal();
+          sv_setref_pv(bindingrv, "Sys::Virt::NWFilterBinding", bindings[i]);
+          PUSHs(bindingrv);
+      }
+      free(bindings);
 
 
 void
@@ -3358,7 +3476,6 @@ void get_all_domain_stats(con, stats, doms_sv=&PL_sv_undef, flags=0)
       if (SvOK(doms_sv)) {
 	  doms_av = (AV*)SvRV(doms_sv);
 	  ndoms = av_len(doms_av) + 1;
-	  fprintf(stderr, "Len %d\n", ndoms);
       } else {
           ndoms = 0;
       }
@@ -4864,6 +4981,23 @@ set_perf_events(dom, newparams, flags=0)
       Safefree(params);
 
 
+HV *
+get_launch_security_info(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+  PREINIT:
+      virTypedParameterPtr params;
+      int nparams;
+    CODE:
+      if (virDomainGetLaunchSecurityInfo(dom, &params, &nparams, flags) < 0) {
+          _croak_error();
+      }
+      RETVAL = vir_typed_param_to_hv(params, nparams);
+      free(params);
+  OUTPUT:
+      RETVAL
+
+
 unsigned long
 get_max_memory(dom)
       virDomainPtr dom;
@@ -5458,6 +5592,16 @@ detach_device(dom, xml, flags=0)
 
 
 void
+detach_device_alias(dom, alias, flags=0)
+      virDomainPtr dom;
+      const char *alias;
+      unsigned int flags;
+    PPCODE:
+      if (virDomainDetachDeviceAlias(dom, alias, flags) < 0)
+          _croak_error();
+
+
+void
 update_device(dom, xml, flags=0)
       virDomainPtr dom;
       const char *xml;
@@ -5611,9 +5755,9 @@ block_stats(dom, path, flags=0)
               field = NULL;
               /* For back compat with previous hash above */
               if (strcmp(params[i].field, "rd_operations") == 0)
-                  field = "rd_reqs";
+                  field = "rd_req";
               else if (strcmp(params[i].field, "wr_operations") == 0)
-                  field = "wr_reqs";
+                  field = "wr_req";
               else if (strcmp(params[i].field, "flush_operations") == 0)
                   field = "flush_reqs";
               if (field) {
@@ -6679,6 +6823,17 @@ _lookup_by_volume(vol)
       RETVAL
 
 
+virStoragePoolPtr
+_lookup_by_target_path(con, path)
+      virConnectPtr con;
+      const char *path;
+    CODE:
+      if (!(RETVAL = virStoragePoolLookupByTargetPath(con, path)))
+          _croak_error();
+  OUTPUT:
+      RETVAL
+
+
 SV *
 get_uuid(pool)
       virStoragePoolPtr pool;
@@ -7704,6 +7859,88 @@ DESTROY(filter_rv)
       }
 
 
+MODULE = Sys::Virt::NWFilterBinding  PACKAGE = Sys::Virt::NWFilterBinding
+
+
+virNWFilterBindingPtr
+_create_xml(con, xml, flags=0)
+      virConnectPtr con;
+      const char *xml;
+      unsigned int flags;
+    CODE:
+      if (!(RETVAL = virNWFilterBindingCreateXML(con, xml, flags)))
+          _croak_error();
+  OUTPUT:
+      RETVAL
+
+
+virNWFilterBindingPtr
+_lookup_by_port_dev(con, name)
+      virConnectPtr con;
+      const char *name;
+    CODE:
+      if (!(RETVAL = virNWFilterBindingLookupByPortDev(con, name)))
+          _croak_error();
+  OUTPUT:
+      RETVAL
+
+
+const char *
+get_port_dev(binding)
+      virNWFilterBindingPtr binding;
+    CODE:
+      if (!(RETVAL = virNWFilterBindingGetPortDev(binding)))
+          _croak_error();
+  OUTPUT:
+      RETVAL
+
+
+const char *
+get_filter_name(binding)
+      virNWFilterBindingPtr binding;
+    CODE:
+      if (!(RETVAL = virNWFilterBindingGetFilterName(binding)))
+          _croak_error();
+  OUTPUT:
+      RETVAL
+
+
+SV *
+get_xml_description(binding, flags=0)
+      virNWFilterBindingPtr binding;
+      unsigned int flags;
+  PREINIT:
+      char *xml;
+    CODE:
+      if (!(xml = virNWFilterBindingGetXMLDesc(binding, flags)))
+          _croak_error();
+
+      RETVAL = newSVpv(xml, 0);
+      free(xml);
+  OUTPUT:
+      RETVAL
+
+
+void
+delete(binding)
+      virNWFilterBindingPtr binding;
+    PPCODE:
+      if (virNWFilterBindingDelete(binding) < 0)
+          _croak_error();
+
+void
+DESTROY(binding_rv)
+      SV *binding_rv;
+ PREINIT:
+      virNWFilterBindingPtr binding;
+  PPCODE:
+      binding = (virNWFilterBindingPtr)SvIV((SV*)SvRV(binding_rv));
+      if (binding) {
+          virNWFilterBindingFree(binding);
+          sv_setiv((SV*)SvRV(binding_rv), 0);
+      }
+
+
 MODULE = Sys::Virt::DomainSnapshot  PACKAGE = Sys::Virt::DomainSnapshot
 
 
@@ -8074,7 +8311,7 @@ recv(st, data, nbytes, flags=0)
       else
           RETVAL = virStreamRecv(st, rawdata, nbytes);
 
-      if (RETVAL != -2 && RETVAL != -3) {
+      if (RETVAL < 0 && RETVAL != -2 && RETVAL != -3) {
           Safefree(rawdata);
           _croak_error();
       }
@@ -8361,6 +8598,12 @@ BOOT:
       REGISTER_CONSTANT(VIR_NODE_ALLOC_PAGES_ADD, NODE_ALLOC_PAGES_ADD);
       REGISTER_CONSTANT(VIR_NODE_ALLOC_PAGES_SET, NODE_ALLOC_PAGES_SET);
 
+
+      REGISTER_CONSTANT_STR(VIR_NODE_SEV_CBITPOS, SEV_CBITPOS);
+      REGISTER_CONSTANT_STR(VIR_NODE_SEV_CERT_CHAIN, SEV_CERT_CHAIN);
+      REGISTER_CONSTANT_STR(VIR_NODE_SEV_PDH, SEV_PDH);
+      REGISTER_CONSTANT_STR(VIR_NODE_SEV_REDUCED_PHYS_BITS, SEV_REDUCED_PHYS_BITS);
+
       stash = gv_stashpv( "Sys::Virt::Event", TRUE );
 
       REGISTER_CONSTANT(VIR_EVENT_HANDLE_READABLE, HANDLE_READABLE);
@@ -8540,6 +8783,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_KEYCODE_SET_USB, KEYCODE_SET_USB);
       REGISTER_CONSTANT(VIR_KEYCODE_SET_WIN32, KEYCODE_SET_WIN32);
       REGISTER_CONSTANT(VIR_KEYCODE_SET_RFB, KEYCODE_SET_RFB);
+      REGISTER_CONSTANT(VIR_KEYCODE_SET_QNUM, KEYCODE_SET_QNUM);
 
       REGISTER_CONSTANT(VIR_DOMAIN_STATS_BALLOON, STATS_BALLOON);
       REGISTER_CONSTANT(VIR_DOMAIN_STATS_BLOCK, STATS_BLOCK);
@@ -8557,6 +8801,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_RUNNING, GET_ALL_STATS_RUNNING);
       REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_SHUTOFF, GET_ALL_STATS_SHUTOFF);
       REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_TRANSIENT, GET_ALL_STATS_TRANSIENT);
+      REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_NOWAIT, GET_ALL_STATS_NOWAIT);
       REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_ENFORCE_STATS, GET_ALL_STATS_ENFORCE_STATS);
       REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_BACKING, GET_ALL_STATS_BACKING);
 
@@ -9055,6 +9300,7 @@ BOOT:
 
       REGISTER_CONSTANT(VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT, INTERFACE_ADDRESSES_SRC_AGENT);
       REGISTER_CONSTANT(VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE, INTERFACE_ADDRESSES_SRC_LEASE);
+      REGISTER_CONSTANT(VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_ARP, INTERFACE_ADDRESSES_SRC_ARP);
 
 
       REGISTER_CONSTANT(VIR_DOMAIN_PASSWORD_ENCRYPTED, PASSWORD_ENCRYPTED);
@@ -9068,6 +9314,20 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_SNAPSHOT, JOB_OPERATION_SNAPSHOT);
       REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_SNAPSHOT_REVERT, JOB_OPERATION_SNAPSHOT_REVERT);
       REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_DUMP, JOB_OPERATION_DUMP);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_POWEROFF, LIFECYCLE_POWEROFF);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_REBOOT, LIFECYCLE_REBOOT);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_CRASH, LIFECYCLE_CRASH);
+
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_DESTROY, LIFECYCLE_ACTION_DESTROY);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_RESTART, LIFECYCLE_ACTION_RESTART);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_RESTART_RENAME, LIFECYCLE_ACTION_RESTART_RENAME);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_PRESERVE, LIFECYCLE_ACTION_PRESERVE);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_DESTROY, LIFECYCLE_ACTION_COREDUMP_DESTROY);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_RESTART, LIFECYCLE_ACTION_COREDUMP_RESTART);
+
+
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_LAUNCH_SECURITY_SEV_MEASUREMENT, LAUNCH_SECURITY_SEV_MEASUREMENT);
 
       stash = gv_stashpv( "Sys::Virt::DomainSnapshot", TRUE );
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_DELETE_CHILDREN, DELETE_CHILDREN);
@@ -9100,19 +9360,6 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING, REVERT_RUNNING);
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_REVERT_PAUSED, REVERT_PAUSED);
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_REVERT_FORCE, REVERT_FORCE);
-
-      stash = gv_stashpv( "Sys::Virt::Lifecycle", TRUE );
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_POWEROFF, LIFECYCLE_POWEROFF);
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_REBOOT, LIFECYCLE_REBOOT);
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_CRASH, LIFECYCLE_CRASH);
-
-      stash = gv_stashpv( "Sys::Virt::LifecycleAction", TRUE );
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_DESTROY, LIFECYCLE_ACTION_DESTROY);
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_RESTART, LIFECYCLE_ACTION_RESTART);
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_RESTART_RENAME, LIFECYCLE_ACTION_RESTART_RENAME);
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_PRESERVE, LIFECYCLE_ACTION_PRESERVE);
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_DESTROY, LIFECYCLE_ACTION_COREDUMP_DESTROY);
-      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_RESTART, LIFECYCLE_ACTION_COREDUMP_RESTART);
 
       stash = gv_stashpv( "Sys::Virt::StoragePool", TRUE );
       REGISTER_CONSTANT(VIR_STORAGE_POOL_INACTIVE, STATE_INACTIVE);
@@ -9490,4 +9737,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_ERR_NO_CLIENT, ERR_NO_CLIENT);
       REGISTER_CONSTANT(VIR_ERR_AGENT_UNSYNCED, ERR_AGENT_UNSYNCED);
       REGISTER_CONSTANT(VIR_ERR_LIBSSH, ERR_LIBSSH);
+      REGISTER_CONSTANT(VIR_ERR_DEVICE_MISSING, ERR_DEVICE_MISSING);
+      REGISTER_CONSTANT(VIR_ERR_INVALID_NWFILTER_BINDING, ERR_INVALID_NWFILTER_BINDING);
+      REGISTER_CONSTANT(VIR_ERR_NO_NWFILTER_BINDING, ERR_NO_NWFILTER_BINDING);
     }

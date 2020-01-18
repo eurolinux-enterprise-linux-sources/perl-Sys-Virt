@@ -1,0 +1,26 @@
+From 9ae7dd0dd0c15dc88ea7e5caf9d29e6fa0630d4c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Thu, 26 Jul 2018 10:30:01 +0100
+Subject: [PATCH] Add missing import of NWFilterBinding
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit fb72cb23fe654d28e7c4027985552cd3b7ca53a0)
+---
+ lib/Sys/Virt.pm | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/lib/Sys/Virt.pm b/lib/Sys/Virt.pm
+index e0b0d77..302a748 100644
+--- a/lib/Sys/Virt.pm
++++ b/lib/Sys/Virt.pm
+@@ -75,6 +75,7 @@ use Sys::Virt::NodeDevice;
+ use Sys::Virt::Interface;
+ use Sys::Virt::Secret;
+ use Sys::Virt::NWFilter;
++use Sys::Virt::NWFilterBinding;
+ use Sys::Virt::DomainSnapshot;
+ use Sys::Virt::Stream;
+ 

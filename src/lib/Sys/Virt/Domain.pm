@@ -45,7 +45,7 @@ sub _new {
     my $class = ref($proto) || $proto;
     my %params = @_;
 
-    my $con = exists $params{connection} ? $params{connection} : die "connection parameter is requried";
+    my $con = exists $params{connection} ? $params{connection} : die "connection parameter is required";
     my $self;
     if (exists $params{name}) {
 	$self = Sys::Virt::Domain::_lookup_by_name($con,  $params{name});
@@ -490,7 +490,7 @@ One of the CONTROL INFO constants listed later
 
 =item C<details>
 
-Currently unsed, always 0.
+Currently unused, always 0.
 
 =item C<stateTime>
 
@@ -658,10 +658,16 @@ later.
 
 =item $dom->detach_device($xml[, $flags])
 
-Hotunplug a existing device whose configuration is given by C<$xml>,
+Hotunplug an existing device whose configuration is given by C<$xml>,
 from the running guest. The optional <$flags> parameter defaults
 to 0, but can accept one of the device hotplug flags described
 later.
+
+=item $dom->detach_device_alias($alias[, $flags])
+
+Hotunplug an existing device which is identified by C<$alias>.
+The optional <$flags> parameter defaults to 0, but can accept one
+of the device hotplug flags described later.
 
 =item $dom->update_device($xml[, $flags])
 
@@ -1719,7 +1725,7 @@ instead of MB/s.
 Abort the current job that is executing for the block device
 associated with C<$path>
 
-=item $dom->block_pull($path, $bandwith, $flags=0)
+=item $dom->block_pull($path, $bandwidth, $flags=0)
 
 Merge the backing files associated with C<$path> into the
 top level file. The C<$bandwidth> parameter specifies the
@@ -1735,7 +1741,7 @@ instead of MB/s.
 
 =back
 
-=item $dom->block_rebase($path, $base, $bandwith, $flags=0)
+=item $dom->block_rebase($path, $base, $bandwidth, $flags=0)
 
 Switch the backing path associated with C<$path> to instead
 use C<$base>. The C<$bandwidth> parameter specifies the
@@ -1774,7 +1780,7 @@ The maximum amount of data in flight in bytes.
 
 =back
 
-=item $dom->block_commit($path, $base, $top, $bandwith, $flags=0)
+=item $dom->block_commit($path, $base, $top, $bandwidth, $flags=0)
 
 Commit changes there were made to the temporary top level file C<$top>.
 Takes all the differences between C<$top> and C<$base> and merge them
@@ -1943,6 +1949,10 @@ Extract the DHCP server lease information
 
 Query the guest OS via an agent
 
+=item Sys::Virt::Domain::INTERFACE_ADDRESSES_SRC_ARP
+
+Extract from the local ARP tables
+
 =back
 
 The returned list will contain one element for each interface.
@@ -2003,6 +2013,20 @@ at the moment when the threshold was reached.
 
 Changes the actions of lifecycle events for domain represented as
 <on_$type>$action</on_$type> in the domain XML.
+
+=item $info = $dom->get_launch_security_info($flags=0)
+
+Get information about the domaim launch security policy. C<$flags>
+is currently unused and defaults to zero. The returned hash may
+contain the following keys
+
+=over 4
+
+=item Sys::Virt::Domain::LAUNCH_SECURITY_SEV_MEASUREMENT
+
+The AMD SEV launch measurement
+
+=back
 
 =back
 
@@ -2188,11 +2212,15 @@ The USB HID keycode set
 
 The Windows keycode set
 
-=item Sys::Virt::Domain::KEYCODE_SET_RFB
+=item Sys::Virt::Domain::KEYCODE_SET_QNUM
 
 The XT keycode set, with the extended scancodes using the
 high bit of the first byte, instead of the low bit of the
 second byte.
+
+=item Sys::Virt::Domain::KEYCODE_SET_RFB
+
+A deprecated alias for C<Sys::Virt::Domain::KEYCODE_SET_QNUM>
 
 =back
 
@@ -3827,7 +3855,7 @@ The host storage has run out of free space
 
 =item Sys::Virt::Domain::DISK_ERROR_UNSPEC
 
-An unspecified error has ocurred.
+An unspecified error has occurred.
 
 =back
 
@@ -4097,6 +4125,10 @@ Require that all requested stats fields are returned
 =item Sys::Virt::Domain::GET_ALL_STATS_BACKING
 
 Get stats for image backing files too
+
+=item Sys::Virt::Domain::GET_ALL_STATS_NOWAIT
+
+Skip stats if they can't be acquired without waiting
 
 =back
 

@@ -1,18 +1,23 @@
 Name:           perl-Sys-Virt
-Version:        3.9.0
+Version:        4.5.0
 Release:        2%{?dist}
 Summary:        Represent and manage a libvirt hypervisor connection
 License:        GPLv2+ or Artistic
-URL:            http://search.cpan.org/dist/Sys-Virt/
-Source0:        http://www.cpan.org/authors/id/D/DA/DANBERR/Sys-Virt-%{version}.tar.gz
-Patch1: 0001-Fix-location-of-lifecycle-constants.patch
+URL:            https://metacpan.org/release/Sys-Virt
+Source0:        https://cpan.metacpan.org/authors/id/D/DA/DANBERR/Sys-Virt-v%{version}.tar.gz
+Patch0: 0000-Add-NWFilterBinding.pm-module-missed-in-dist.patch
+Patch1: 0001-Add-missing-import-of-NWFilterBinding.patch
+Patch2: 0002-Add-missing-initialization-of-virTypedParameters.patch
+Patch3: 0003-Add-missing-free-ing-of-virTypedParameters.patch
+Patch4: 0004-Clear-typed-parameter-elements-as-well-as-array.patch
 # Build
 BuildRequires:  coreutils
 BuildRequires:  findutils
 BuildRequires:  libvirt-devel >= %{version}
 BuildRequires:  make
 BuildRequires:  perl
-BuildRequires:  perl(ExtUtils::MakeMaker)
+BuildRequires:  perl(ExtUtils::CBuilder)
+BuildRequires:  perl(Module::Build)
 BuildRequires:  sed
 # Runtime
 BuildRequires:  perl(overload)
@@ -30,6 +35,7 @@ BuildRequires:  perl(XML::XPath::XMLParser)
 BuildRequires:  perl(Test::CPAN::Changes)
 BuildRequires:  perl(Test::Pod) >= 1.00
 BuildRequires:  perl(Test::Pod::Coverage) >= 1.00
+BuildRequires:  git
 Requires:       perl(:MODULE_COMPAT_%(eval "$(perl -V:version)"; echo $version))
 
 %description
@@ -38,23 +44,19 @@ machine management APIs. This allows machines running within arbitrary
 virtualization containers to be managed with a consistent API.
 
 %prep
-%setup -q -n Sys-Virt-%{version}
-%patch1 -p1
-sed -i -e '/Sys-Virt\.spec/d' Makefile.PL
-sed -i -e '/\.spec\.PL$/d' MANIFEST
-rm -f *.spec.PL
+%autosetup -S git -n Sys-Virt-v%{version}
 
 %build
-perl Makefile.PL INSTALLDIRS=vendor OPTIMIZE="%{optflags}" NO_PACKLIST=1
-make %{?_smp_mflags}
+%{__perl} Build.PL installdirs=vendor
+./Build
 
 %install
-make pure_install DESTDIR=%{buildroot}
-find %{buildroot} -type f -name '*.bs' -empty -delete
+./Build install destdir=$RPM_BUILD_ROOT create_packlist=0
+
 %{_fixperms} %{buildroot}/*
 
 %check
-make test
+./Build test
 
 %files
 %license LICENSE
@@ -64,6 +66,19 @@ make test
 %{_mandir}/man3/*
 
 %changelog
+* Tue Aug 14 2018 Daniel P. Berrangé <berrange@redhat.com> - 4.5.0-2
+- Fix typed parameter memory handling (rhbz#1613227)
+- Fix missing NWFilterBinding module (rhbz#1608755)
+
+* Tue Jul  3 2018 Daniel P. Berrangé <berrange@redhat.com> - 4.5.0-1
+- Update to 4.5.0 release (rhbz #1563172)
+
+* Thu Jun 14 2018 Daniel P. Berrangé <berrange@redhat.com> - 4.4.0-1
+- Update to 4.4.0 release (rhbz #1563172)
+
+* Mon Jun 11 2018 Daniel P. Berrangé <berrange@redhat.com> - 4.2.0-1
+- Update to 4.2.0 release (rhbz #1563172)
+
 * Thu Nov 30 2017 Daniel P. Berrange <berrange@redhat.com> - 3.9.0-2
 - Fix package placement of lifecycle constants (rhbz #1515722)
 
