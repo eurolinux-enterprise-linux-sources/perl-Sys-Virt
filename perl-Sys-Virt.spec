@@ -1,10 +1,11 @@
 Name:           perl-Sys-Virt
-Version:        3.2.0
-Release:        1%{?dist}
+Version:        3.9.0
+Release:        2%{?dist}
 Summary:        Represent and manage a libvirt hypervisor connection
 License:        GPLv2+ or Artistic
 URL:            http://search.cpan.org/dist/Sys-Virt/
 Source0:        http://www.cpan.org/authors/id/D/DA/DANBERR/Sys-Virt-%{version}.tar.gz
+Patch1: 0001-Fix-location-of-lifecycle-constants.patch
 # Build
 BuildRequires:  coreutils
 BuildRequires:  findutils
@@ -38,6 +39,7 @@ virtualization containers to be managed with a consistent API.
 
 %prep
 %setup -q -n Sys-Virt-%{version}
+%patch1 -p1
 sed -i -e '/Sys-Virt\.spec/d' Makefile.PL
 sed -i -e '/\.spec\.PL$/d' MANIFEST
 rm -f *.spec.PL
@@ -62,6 +64,15 @@ make test
 %{_mandir}/man3/*
 
 %changelog
+* Thu Nov 30 2017 Daniel P. Berrange <berrange@redhat.com> - 3.9.0-2
+- Fix package placement of lifecycle constants (rhbz #1515722)
+
+* Mon Nov  6 2017 Daniel P. Berrange <berrange@redhat.com> - 3.9.0-1
+- Rebase to 3.9.0 release (rhbz #1472268)
+
+* Tue Sep  5 2017 Daniel P. Berrange <berrange@redhat.com> - 3.7.0-1
+- Rebase to 3.7.0 release (rhbz #1472268)
+
 * Mon Apr  3 2017 Daniel P. Berrange <berrange@redhat.com> - 3.2.0-1
 - Rebase to 3.2.0 release (rhbz #1382643)
 

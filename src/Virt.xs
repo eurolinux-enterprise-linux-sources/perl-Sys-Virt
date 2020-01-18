@@ -1948,13 +1948,107 @@ _stream_send_all_source(virStreamPtr st,
         const char *newdata = SvPV_nolen(datasv);
         if (ret > nbytes)
             ret = nbytes;
-        strncpy(data, newdata, nbytes);
+        memcpy(data, newdata, nbytes);
     }
 
     FREETMPS;
     LEAVE;
 
     SvREFCNT_dec(datasv);
+
+    return ret;
+}
+
+
+static int
+_stream_sparse_send_all_hole_handler(virStreamPtr st,
+                                     int *inData,
+                                     long long *length,
+                                     void *opaque)
+{
+    AV *av = opaque;
+    SV **self;
+    SV **hole_handler;
+    SV *inDataSV;
+    SV *lengthSV;
+    int count;
+    int ret;
+    dSP;
+
+    self = av_fetch(av, 0, 0);
+    hole_handler = av_fetch(av, 2, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    PUTBACK;
+
+    count = call_sv((SV*)*hole_handler, G_ARRAY);
+
+    SPAGAIN;
+
+    if (count == 2) {
+        /* @hole_handler returns (in_data, length), but on a stack.
+         * Therefore the order is reversed. */
+        lengthSV = POPs;
+        inDataSV = POPs;
+        *inData = virt_SvIVll(inDataSV);
+        *length = virt_SvIVll(lengthSV);
+        ret = 0;
+    } else {
+        ret = -1;
+    }
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    return ret;
+}
+
+
+static int
+_stream_sparse_send_all_skip_handler(virStreamPtr st,
+                                     long long length,
+                                     void *opaque)
+{
+    AV *av = opaque;
+    SV **self;
+    SV **skip_handler;
+    int rv;
+    int ret;
+    dSP;
+
+    self = av_fetch(av, 0, 0);
+    skip_handler = av_fetch(av, 3, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    XPUSHs(sv_2mortal(virt_newSVll(length)));
+    PUTBACK;
+
+    rv = call_sv((SV*)*skip_handler, G_SCALAR);
+
+    SPAGAIN;
+
+    if (rv == 1) {
+        ret = POPi;
+    } else {
+        ret = -1;
+    }
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
 
     return ret;
 }
@@ -2003,6 +2097,48 @@ _stream_recv_all_sink(virStreamPtr st,
     LEAVE;
 
     SvREFCNT_dec(datasv);
+
+    return ret;
+}
+
+
+static int
+_stream_sparse_recv_hole_handler(virStreamPtr st,
+                                 long long offset,
+                                 void *opaque)
+{
+    AV *av = opaque;
+    SV **self;
+    SV **hole_handler;
+    int rv;
+    int ret;
+    dSP;
+
+    self = av_fetch(av, 0, 0);
+    hole_handler = av_fetch(av, 2, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    XPUSHs(sv_2mortal(virt_newSVll(offset)));
+    PUTBACK;
+
+    rv = call_sv((SV*)*hole_handler, G_SCALAR);
+
+    SPAGAIN;
+
+    if (rv == 1) {
+        ret = POPi;
+    } else {
+        ret = -1;
+    }
+
+    FREETMPS;
+    LEAVE;
 
     return ret;
 }
@@ -4030,6 +4166,31 @@ managed_save_remove(dom, flags=0)
 
 
 void
+managed_save_define_xml(dom, xml, flags=0)
+      virDomainPtr dom;
+      const char *xml;
+      unsigned int flags;
+PPCODE:
+      if (virDomainManagedSaveDefineXML(dom, xml, flags) < 0)
+          _croak_error();
+
+SV *
+managed_save_get_xml_description(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+  PREINIT:
+      char *xml;
+    CODE:
+      if (!(xml = virDomainManagedSaveGetXMLDesc(dom, flags)))
+          _croak_error();
+
+      RETVAL = newSVpv(xml, 0);
+      free(xml);
+  OUTPUT:
+      RETVAL
+
+
+void
 core_dump(dom, to, flags=0)
       virDomainPtr dom;
       const char *to;
@@ -5189,6 +5350,21 @@ migrate_set_max_downtime(dom, downtime, flags=0)
          _croak_error();
 
 
+SV *
+migrate_get_max_downtime(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+  PREINIT:
+      unsigned long long downtime;
+    CODE:
+      if (virDomainMigrateGetMaxDowntime(dom, &downtime, flags) < 0)
+          _croak_error();
+
+      RETVAL = virt_newSVull(downtime);
+  OUTPUT:
+      RETVAL
+
+
 void
 migrate_set_max_speed(dom, bandwidth, flags=0)
      virDomainPtr dom;
@@ -6132,6 +6308,16 @@ set_block_threshold(dom, dev, thresholdsv, flags=0)
     threshold = virt_SvIVull(thresholdsv);
     if (virDomainSetBlockThreshold(dom, dev, threshold, flags) < 0)
         _croak_error();
+
+void
+set_lifecycle_action(dom, type, action, flags=0)
+      virDomainPtr dom;
+      unsigned int type;
+      unsigned int action;
+      unsigned int flags;
+PPCODE:
+      if (virDomainSetLifecycleAction(dom, type, action, flags) < 0)
+          _croak_error();
 
 void
 destroy(dom_rv, flags=0)
@@ -7874,16 +8060,21 @@ send(st, data, nbytes)
 
 
 int
-recv(st, data, nbytes)
+recv(st, data, nbytes, flags=0)
       virStreamPtr st;
       SV *data;
       size_t nbytes;
+      unsigned int flags;
  PREINIT:
       char *rawdata;
     CODE:
       Newx(rawdata, nbytes, char);
-      if ((RETVAL = virStreamRecv(st, rawdata, nbytes)) < 0 &&
-          RETVAL != -2) {
+      if (flags)
+          RETVAL = virStreamRecvFlags(st, rawdata, nbytes, flags);
+      else
+          RETVAL = virStreamRecv(st, rawdata, nbytes);
+
+      if (RETVAL != -2 && RETVAL != -3) {
           Safefree(rawdata);
           _croak_error();
       }
@@ -7893,6 +8084,34 @@ recv(st, data, nbytes)
       Safefree(rawdata);
   OUTPUT:
       RETVAL
+
+
+SV *
+recv_hole(st, flags=0)
+      virStreamPtr st;
+      unsigned int flags;
+  PREINIT:
+      long long length;
+    CODE:
+      if (virStreamRecvHole(st, &length, flags) < 0)
+          _croak_error();
+
+      RETVAL = virt_newSVll(length);
+  OUTPUT:
+      RETVAL
+
+
+void
+send_hole(st, lengthSV, flags=0)
+      virStreamPtr st;
+      SV *lengthSV;
+      unsigned int flags;
+ PREINIT:
+      long long length;
+  PPCODE:
+      length = virt_SvIVll(lengthSV);
+      if (virStreamSendHole(st, length, flags) < 0)
+          _croak_error();
 
 
 void
@@ -7938,6 +8157,64 @@ recv_all(stref, handler)
 
       SvREFCNT_dec(opaque);
 
+
+void
+sparse_recv_all(stref, handler, hole_handler)
+      SV *stref;
+      SV *handler;
+      SV *hole_handler;
+ PREINIT:
+      AV *opaque;
+      virStreamPtr st;
+    CODE:
+      st = (virStreamPtr)SvIV((SV*)SvRV(stref));
+
+      opaque = newAV();
+      SvREFCNT_inc(stref);
+      SvREFCNT_inc(handler);
+      SvREFCNT_inc(hole_handler);
+      av_push(opaque, stref);
+      av_push(opaque, handler);
+      av_push(opaque, hole_handler);
+
+      if (virStreamSparseRecvAll(st,
+                                 _stream_recv_all_sink,
+                                 _stream_sparse_recv_hole_handler,
+                                 opaque) < 0)
+          _croak_error();
+
+      SvREFCNT_dec(opaque);
+
+void
+sparse_send_all(stref, handler, hole_handler, skip_handler)
+      SV *stref;
+      SV *handler;
+      SV *hole_handler;
+      SV *skip_handler;
+ PREINIT:
+      AV *opaque;
+      virStreamPtr st;
+    CODE:
+      st = (virStreamPtr)SvIV((SV*)SvRV(stref));
+
+      opaque = newAV();
+      SvREFCNT_inc(stref);
+      SvREFCNT_inc(handler);
+      SvREFCNT_inc(hole_handler);
+      SvREFCNT_inc(skip_handler);
+      av_push(opaque, stref);
+      av_push(opaque, handler);
+      av_push(opaque, hole_handler);
+      av_push(opaque, skip_handler);
+
+      if (virStreamSparseSendAll(st,
+                                 _stream_send_all_source,
+                                 _stream_sparse_send_all_hole_handler,
+                                 _stream_sparse_send_all_skip_handler,
+                                 opaque) < 0)
+          _croak_error();
+
+      SvREFCNT_dec(opaque);
 
 void
 add_callback(stref, events, cb)
@@ -8334,6 +8611,8 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_STOPPED_FROM_SNAPSHOT, EVENT_STOPPED_FROM_SNAPSHOT);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SHUTDOWN_FINISHED, EVENT_SHUTDOWN_FINISHED);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SHUTDOWN_HOST, EVENT_SHUTDOWN_HOST);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SHUTDOWN_GUEST, EVENT_SHUTDOWN_GUEST);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_PMSUSPENDED_MEMORY, EVENT_PMSUSPENDED_MEMORY);
 
@@ -8397,11 +8676,13 @@ BOOT:
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_TOTAL, JOB_MEMORY_TOTAL);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_BPS, JOB_MEMORY_BPS);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_DIRTY_RATE, JOB_MEMORY_DIRTY_RATE);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_PAGE_SIZE, JOB_MEMORY_PAGE_SIZE);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_ITERATION, JOB_MEMORY_ITERATION);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_SETUP_TIME, JOB_SETUP_TIME);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_TIME_ELAPSED, JOB_TIME_ELAPSED);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_TIME_ELAPSED_NET, JOB_TIME_ELAPSED_NET);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_TIME_REMAINING, JOB_TIME_REMAINING);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_OPERATION, JOB_OPERATION);
 
       REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_JOB_TYPE_UNKNOWN, BLOCK_JOB_TYPE_UNKNOWN);
       REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_JOB_TYPE_PULL, BLOCK_JOB_TYPE_PULL);
@@ -8705,6 +8986,7 @@ BOOT:
 
       REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_COPY_REUSE_EXT, BLOCK_COPY_REUSE_EXT);
       REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_COPY_SHALLOW, BLOCK_COPY_SHALLOW);
+      REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_COPY_TRANSIENT_JOB, BLOCK_COPY_TRANSIENT_JOB);
 
       REGISTER_CONSTANT(VIR_DOMAIN_BLOCK_JOB_SPEED_BANDWIDTH_BYTES, BLOCK_JOB_SPEED_BANDWIDTH_BYTES);
 
@@ -8777,6 +9059,16 @@ BOOT:
 
       REGISTER_CONSTANT(VIR_DOMAIN_PASSWORD_ENCRYPTED, PASSWORD_ENCRYPTED);
 
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_UNKNOWN, JOB_OPERATION_UNKNOWN);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_START, JOB_OPERATION_START);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_SAVE, JOB_OPERATION_SAVE);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_RESTORE, JOB_OPERATION_RESTORE);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_MIGRATION_IN, JOB_OPERATION_MIGRATION_IN);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_MIGRATION_OUT, JOB_OPERATION_MIGRATION_OUT);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_SNAPSHOT, JOB_OPERATION_SNAPSHOT);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_SNAPSHOT_REVERT, JOB_OPERATION_SNAPSHOT_REVERT);
+      REGISTER_CONSTANT(VIR_DOMAIN_JOB_OPERATION_DUMP, JOB_OPERATION_DUMP);
+
       stash = gv_stashpv( "Sys::Virt::DomainSnapshot", TRUE );
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_DELETE_CHILDREN, DELETE_CHILDREN);
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_DELETE_METADATA_ONLY, DELETE_METADATA_ONLY);
@@ -8808,6 +9100,19 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING, REVERT_RUNNING);
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_REVERT_PAUSED, REVERT_PAUSED);
       REGISTER_CONSTANT(VIR_DOMAIN_SNAPSHOT_REVERT_FORCE, REVERT_FORCE);
+
+      stash = gv_stashpv( "Sys::Virt::Lifecycle", TRUE );
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_POWEROFF, LIFECYCLE_POWEROFF);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_REBOOT, LIFECYCLE_REBOOT);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_CRASH, LIFECYCLE_CRASH);
+
+      stash = gv_stashpv( "Sys::Virt::LifecycleAction", TRUE );
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_DESTROY, LIFECYCLE_ACTION_DESTROY);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_RESTART, LIFECYCLE_ACTION_RESTART);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_RESTART_RENAME, LIFECYCLE_ACTION_RESTART_RENAME);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_PRESERVE, LIFECYCLE_ACTION_PRESERVE);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_DESTROY, LIFECYCLE_ACTION_COREDUMP_DESTROY);
+      REGISTER_CONSTANT(VIR_DOMAIN_LIFECYCLE_ACTION_COREDUMP_RESTART, LIFECYCLE_ACTION_COREDUMP_RESTART);
 
       stash = gv_stashpv( "Sys::Virt::StoragePool", TRUE );
       REGISTER_CONSTANT(VIR_STORAGE_POOL_INACTIVE, STATE_INACTIVE);
@@ -8861,6 +9166,8 @@ BOOT:
       REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_UNDEFINED, EVENT_UNDEFINED);
       REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_STARTED, EVENT_STARTED);
       REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_STOPPED, EVENT_STOPPED);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_CREATED, EVENT_CREATED);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_DELETED, EVENT_DELETED);
 
 
       stash = gv_stashpv( "Sys::Virt::Network", TRUE );
@@ -8927,6 +9234,9 @@ BOOT:
       REGISTER_CONSTANT(VIR_CONNECT_LIST_NODE_DEVICES_CAP_VPORTS, LIST_CAP_VPORTS);
       REGISTER_CONSTANT(VIR_CONNECT_LIST_NODE_DEVICES_CAP_SCSI_GENERIC, LIST_CAP_SCSI_GENERIC);
       REGISTER_CONSTANT(VIR_CONNECT_LIST_NODE_DEVICES_CAP_DRM, LIST_CAP_DRM);
+      REGISTER_CONSTANT(VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV, LIST_CAP_MDEV);
+      REGISTER_CONSTANT(VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV_TYPES, LIST_CAP_MDEV_TYPES);
+      REGISTER_CONSTANT(VIR_CONNECT_LIST_NODE_DEVICES_CAP_CCW_DEV, LIST_CAP_CCW_DEV);
 
       REGISTER_CONSTANT(VIR_NODE_DEVICE_EVENT_ID_LIFECYCLE, EVENT_ID_LIFECYCLE);
       REGISTER_CONSTANT(VIR_NODE_DEVICE_EVENT_ID_UPDATE, EVENT_ID_UPDATE);
@@ -8969,6 +9279,10 @@ BOOT:
       REGISTER_CONSTANT(VIR_STORAGE_VOL_USE_ALLOCATION, USE_ALLOCATION);
       REGISTER_CONSTANT(VIR_STORAGE_VOL_GET_PHYSICAL, GET_PHYSICAL);
 
+      REGISTER_CONSTANT(VIR_STORAGE_VOL_DOWNLOAD_SPARSE_STREAM, VOL_DOWNLOAD_SPARSE_STREAM);
+
+      REGISTER_CONSTANT(VIR_STORAGE_VOL_UPLOAD_SPARSE_STREAM, VOL_UPLOAD_SPARSE_STREAM);
+
       stash = gv_stashpv( "Sys::Virt::Secret", TRUE );
       REGISTER_CONSTANT(VIR_SECRET_USAGE_TYPE_NONE, USAGE_TYPE_NONE);
       REGISTER_CONSTANT(VIR_SECRET_USAGE_TYPE_VOLUME, USAGE_TYPE_VOLUME);
@@ -8996,6 +9310,8 @@ BOOT:
       REGISTER_CONSTANT(VIR_STREAM_EVENT_WRITABLE, EVENT_WRITABLE);
       REGISTER_CONSTANT(VIR_STREAM_EVENT_ERROR, EVENT_ERROR);
       REGISTER_CONSTANT(VIR_STREAM_EVENT_HANGUP, EVENT_HANGUP);
+
+      REGISTER_CONSTANT(VIR_STREAM_RECV_STOP_AT_HOLE, RECV_STOP_AT_HOLE);
 
 
 
@@ -9072,6 +9388,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_FROM_XENXL, FROM_XENXL);
       REGISTER_CONSTANT(VIR_FROM_PERF, FROM_PERF);
       REGISTER_CONSTANT(VIR_FROM_LIBSSH, FROM_LIBSSH);
+      REGISTER_CONSTANT(VIR_FROM_RESCTRL, FROM_RESCTRL);
 
 
       REGISTER_CONSTANT(VIR_ERR_OK, ERR_OK);

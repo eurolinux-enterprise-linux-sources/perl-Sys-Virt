@@ -220,6 +220,16 @@ Remove the current managed save image, causing the guest to perform
 a full boot next time it is started. The C<$flags> parameter is
 unused and defaults to zero.
 
+=item $dom->managed_save_define_xml($xml, $flags=0)
+
+Update the XML of the managed save image to C<$xml>. The C<$flags>
+parameter is unused and defaults to zero.
+
+=item $xml = $dom->managed_save_get_xml_description($flags=0)
+
+Get the XML in the managed save image. The C<$flags>
+parameter is unused and defaults to zero.
+
 =item $dom->core_dump($filename[, $flags])
 
 Trigger a core dump of the guest virtual machine, saving its memory
@@ -1254,6 +1264,12 @@ at the cost of longer time blackout for the guest OS at the switch
 over point. The C<downtime> parameter is measured in milliseconds.
 The C<$flags> parameter is currently unused and defaults to zero.
 
+=item $downtime = $dom->migrate_get_max_downtime($flags=0)
+Get the current value of the maximum downtime allowed during a
+migration of a guest. The returned <downtime> value is measured
+in milliseconds. The C<$flags> parameter is currently unused and
+defaults to zero.
+
 =item $dom->migrate_set_max_speed($bandwidth, $flags=0)
 
 Set the maximum allowed bandwidth during migration of the guest.
@@ -1550,6 +1566,10 @@ The bytes per second transferred
 
 The number of memory pages dirtied per second
 
+=item Sys::Virt::Domain::JOB_MEMORY_PAGE_SIZE
+
+The memory page size in bytes
+
 =item Sys::Virt::Domain::JOB_MEMORY_ITERATION
 
 The total number of iterations over guest memory
@@ -1610,6 +1630,52 @@ host.
 =item Sys::Virt::Domain::JOB_SETUP_TIME
 
 The number of milliseconds of time doing setup of the job
+
+=item Sys::Virt::Domain::JOB_OPERATION
+
+The type of operation associated with the job
+
+=back
+
+The values for the Sys::Virt::Domain::JOB_OPERATION field are
+
+=over 4
+
+=item Sys::Virt::Domain::JOB_OPERATION_UNKNOWN
+
+No known job type
+
+=item Sys::Virt::Domain::JOB_OPERATION_START
+
+The guest is starting
+
+=item Sys::Virt::Domain::JOB_OPERATION_SAVE
+
+The guest is saving to disk
+
+=item Sys::Virt::Domain::JOB_OPERATION_RESTORE
+
+The guest is restoring from disk
+
+=item Sys::Virt::Domain::JOB_OPERATION_MIGRATION_IN
+
+The guest is migrating in from another host
+
+=item Sys::Virt::Domain::JOB_OPERATION_MIGRATION_OUT
+
+The guest is migrating out to another host
+
+=item Sys::Virt::Domain::JOB_OPERATION_SNAPSHOT
+
+The guest is saving a snapshot
+
+=item Sys::Virt::Domain::JOB_OPERATION_SNAPSHOT_REVERT
+
+The guest is reverting to a snapshot
+
+=item Sys::Virt::Domain::JOB_OPERATION_DUMP
+
+The guest is saving a crash dump
 
 =back
 
@@ -1932,6 +1998,11 @@ described by C<$dev> is written beyond the set C<$threshold>
 level. The threshold level is unset once the event fires. The
 event might not be delivered at all if libvirtd was not running
 at the moment when the threshold was reached.
+
+=item $dom->set_lifecycle_action($type, $action, $flags=0)
+
+Changes the actions of lifecycle events for domain represented as
+<on_$type>$action</on_$type> in the domain XML.
 
 =back
 
@@ -3053,6 +3124,14 @@ The domain has shutdown but is not yet stopped
 
 The domain finished shutting down
 
+=item Sys::Virt::Domain::EVENT_SHUTDOWN_HOST
+
+The domain shutdown due to host trigger
+
+=item Sys::Virt::Domain::EVENT_SHUTDOWN_GUEST
+
+The domain shutdown due to guest trigger
+
 =back
 
 =item Sys::Virt::Domain::EVENT_SUSPENDED
@@ -3527,6 +3606,10 @@ Limit copy to top of source backing chain
 =item Sys::Virt::Domain::BLOCK_COPY_REUSE_EXT
 
 Reuse existing external file for copy
+
+=item Sys::Virt::Domain::BLOCK_COPY_TRANSIENT_JOB
+
+Don't force usage of recoverable job for the copy operation
 
 =back
 
@@ -4463,6 +4546,57 @@ The name of the blkdev group
 =item Sys::Virt::Domain::TUNABLE_IOTHREADSPIN
 
 The I/O threads pinning
+
+=back
+
+=head2 DOMAIN LIFECYCLE CONSTANTS
+
+The following constants are useful when setting action for
+lifecycle events.
+
+=over 4
+
+=item Sys::Virt::Domain::LIFECYCLE_POWEROFF
+
+The poweroff lifecycle event type
+
+=item Sys::Virt::Domain::LIFECYCLE_REBOOT
+
+The reboot lifecycle event type
+
+=item Sys::Virt::Domain::LIFECYCLE_CRASH
+
+The crash lifecycle event type
+
+=back
+
+=head2 DOMAIN LIFECYCLE ACTION CONSTANTS
+
+=over 4
+
+=item Sys::Virt::Domain::LIFECYCLE_ACTION_DESTROY
+
+The destroy lifecycle action
+
+=item Sys::Virt::Domain::LIFECYCLE_ACTION_RESTART
+
+The restart lifecycle action
+
+=item Sys::Virt::Domain::LIFECYCLE_ACTION_RESTART_RENAME
+
+The restart-rename lifecycle action
+
+=item Sys::Virt::Domain::LIFECYCLE_ACTION_PRESERVE
+
+The preserve lifecycle action
+
+=item Sys::Virt::Domain::LIFECYCLE_ACTION_COREDUMP_DESTROY
+
+The coredump-destroy lifecycle action
+
+=item Sys::Virt::Domain::LIFECYCLE_ACTION_COREDUMP_RESTART
+
+The coredump-restart lifecycle action
 
 =back
 

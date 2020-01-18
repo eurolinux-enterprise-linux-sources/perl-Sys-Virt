@@ -1,5 +1,43 @@
 Revision history for perl module Sys::Virt
 
+3.9.0 2017-11-03
+
+ - Add VIR_DOMAIN_JOB_MEMORY_PAGE_SIZE constant
+ - Add set_lifecycle_action
+
+3.8.0 2017-10-04
+
+ - Add VIR_STORAGE_POOL_EVENT_{DELETED,CREATED} constants
+
+3.7.0 2017-09-04
+
+ - Add VIR_FROM_RESCTRL constant
+ - Add migrate_get_max_downtime
+ - Add managed_save_define_xml and managed_save_get_xml_description
+
+3.5.0 2017-07-06
+
+ - Add VIR_DOMAIN_BLOCK_COPY_TRANSIENT_JOB constant
+
+3.4.0 2017-06-05
+
+ - Add LIST_CAP_MDEV & LIST_CAP_MDEV_TYPES constants
+ - Fix send_all() callback helper
+ - Introduce flags to Stream::recv() and
+   register RECV_STOP_AT_HOLE constant
+ - Introduce Stream::recv_hole() and Stream::send_hole()
+ - Introduce Stream::sparse_recv_all()
+ - Introduce Stream::sparse_send_all()
+ - Register VOL_DOWNLOAD_SPARSE_STREAM &
+   VOL_UPLOAD_SPARSE_STREAM constants
+ - Add vol-sparse.pl example
+ - Add new domain event constants
+ - Add new LIST_CAP_CCW_DEV constant
+
+3.3.0 2017-05-08
+
+ - Add VIR_DOMAIN_JOB_OPERATION* constants
+
 3.2.0 2017-04-03
 
  - Add PERF_PARAM_CPU_CLOCK constant
