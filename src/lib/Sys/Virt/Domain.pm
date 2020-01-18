@@ -689,6 +689,11 @@ Set the number of virtual CPUs in the guest VM to C<$count>.
 The optional C<$flags> parameter can be used to control whether
 the setting changes the live config or inactive config.
 
+=item $dom->set_vcpu($cpumap, $state, [$flags])
+
+Set the state of the CPUs in C<$cpumap> to C<$state>. The
+C<$flags> parameter defaults to zero if not present.
+
 =item $count = $dom->get_vcpus([$flags])
 
 Get the number of virtual CPUs in the guest VM.
@@ -1919,6 +1924,15 @@ C<$signum> value must be one of the constants listed
 later, not a POSIX or Linux signal value. C<$flags>
 is currently unused and defaults to zero.
 
+=item $dom->set_block_threshold($dev, $threshold, $flags=0);
+
+Set the threshold level for delivering the
+EVENT_ID_BLOCK_THRESHOLD if the device or backing chain element
+described by C<$dev> is written beyond the set C<$threshold>
+level. The threshold level is unset once the event fires. The
+event might not be delivered at all if libvirtd was not running
+at the moment when the threshold was reached.
+
 =back
 
 =head1 CONSTANTS
@@ -2379,6 +2393,13 @@ Pin memory for RDMA transfer
 
 Enable support for post-copy migration
 
+=item Sys::Virt::Domain::MIGRATE_TLS
+
+Setting this flag will cause the migration to attempt to use the
+TLS environment configured by the hypervisor in order to perform
+the migration. If incorrectly configured on either source or
+destination, the migration will fail.
+
 =back
 
 =head2 UNDEFINE CONSTANTS
@@ -2401,6 +2422,11 @@ domain.
 =item Sys::Virt::Domain::UNDEFINE_NVRAM
 
 Also remove any NVRAM state file when undefining the virtual
+domain.
+
+=item Sys::Virt::Domain::UNDEFINE_KEEP_NVRAM
+
+keep NVRAM state file when undefining the virtual
 domain.
 
 =back
@@ -2561,6 +2587,36 @@ The maximum I/O operations written per second.
 
 The maximum I/O operations per second
 
+=item Sys::Virt::Domain::BLOCK_IOTUNE_GROUP_NAME
+
+A string representing a group name to allow sharing of I/O
+throttling quota between multiple drives
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_TOTAL_BYTES_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum total bytes processed per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_READ_BYTES_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum bytes read per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_WRITE_BYTES_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum bytes written per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_TOTAL_IOPS_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum total I/O operations processed
+per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_READ_IOPS_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum I/O operations read per second.
+
+=item Sys::Virt::Domain::BLOCK_IOTUNE_WRITE_IOPS_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum I/O operations written per second.
+
 =back
 
 =head2 SCHEDULER CONSTANTS
@@ -2707,6 +2763,127 @@ The MBMT event counter which can be used to monitor total system
 bandwidth (bytes/s) from one level of cache to another. It
 corresponds to the "perf.mbmt" field in the *Stats APIs.
 
+=item Sys::Virt::Domain::PERF_PARAM_CACHE_MISSES
+
+The cache_misses perf event counter which can be used to measure
+the count of cache misses by applications running on the
+platform. It corresponds to the "perf.cache_misses" field in the
+*Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_CACHE_REFERENCES
+
+The cache_references perf event counter which can be used to
+measure the count of cache hits by applications running on the
+platform. It corresponds to the "perf.cache_references" field in
+the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_CPU_CYCLES
+
+The cpu_cycles perf event counter which can be used to measure
+how many cpu cycles one instruction needs.  It corresponds to the
+"perf.cpu_cycles" field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_INSTRUCTIONS
+
+The instructions perf event counter which can be used to measure
+the count of instructions by applications running on the
+platform. It corresponds to the "perf.instructions" field in the
+*Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_BRANCH_INSTRUCTIONS
+
+The branch_instructions perf event counter which can be used to measure
+the count of instructions by applications running on the
+platform. It corresponds to the "perf.branch_instructions" field in the
+*Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_BRANCH_MISSES
+
+The branch_misses perf event which can be used to measure the
+count of branch misses by applications running on the platform.
+It corresponds to the "perf.branch_misses" field in the *Stats
+APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_BUS_CYCLES
+The bus_cycles perf event counter which can be used to measure
+the count of bus cycles by applications running on the platform.
+It corresponds to the "perf.bus_cycles" field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_STALLED_CYCLES_FRONTEND
+The stalled_cycles_frontend perf event counter which can be used
+to measure the count of stalled cpu cycles in the frontend of the
+instruction processor pipeline by applications running on the
+platform. It corresponds to the "perf.stalled_cycles_frontend"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_STALLED_CYCLES_BACKEND
+The stalled_cycles_backend perf event counter which can be used
+to measure the count of stalled cpu cycles in the backend of the
+instruction processor pipeline by application running on the
+platform. It corresponds to the "perf.stalled_cycles_backend"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_REF_CPU_CYCLES
+The ref_cpu_cycles perf event counter which can be used to
+measure the count of total cpu cycles not affected by CPU
+frequency scaling by applications running on the platform.
+It corresponds to the "perf.ref_cpu_cycles" field in the
+*Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_CPU_CLOCK
+The cpu_clock perf event counter which can be used to
+measure the count of cpu clock time by applications
+running on the platform. It corresponds to the
+"perf.cpu_clock" field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_TASK_CLOCK
+The task_clock perf event counter which can be used to
+measure the count of task clock time by applications
+running on the platform. It corresponds to the
+"perf.task_clock" field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_PAGE_FAULTS
+The page_faults perf event counter which can be used to
+measure the count of page faults by applications running
+on the platform. It corresponds to the "perf.page_faults"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_CONTEXT_SWITCHES
+The context_switches perf event counter which can be used to
+measure the count of context switches by applications running
+on the platform. It corresponds to the "perf.context_switches"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_CPU_MIGRATIONS
+The cpu_migrations perf event counter which can be used to
+measure the count of cpu migrations by applications running
+on the platform. It corresponds to the "perf.cpu_migrations"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_PAGE_FAULTS_MIN
+The page_faults_min perf event counter which can be used to
+measure the count of minor page faults by applications running
+on the platform. It corresponds to the "perf.page_faults_min"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_PAGE_FAULTS_MAJ
+The page_faults_maj perf event counter which can be used to
+measure the count of major page faults by applications running
+on the platform. It corresponds to the "perf.page_faults_maj"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_ALIGNMENT_FAULTS
+The alignment_faults perf event counter which can be used to
+measure the count of alignment faults by applications running
+on the platform. It corresponds to the "perf.alignment_faults"
+field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_EMULATION_FAULTS
+The emulation_faults perf event counter which can be used to
+measure the count of emulation faults by applications running
+on the platform. It corresponds to the "perf.emulation_faults"
+field in the *Stats APIs.
+
 =back
 
 =head2 VCPU FLAGS
@@ -2735,6 +2912,10 @@ Flag to request adjustment of the maximum vCPU value
 =item Sys::Virt::Domain::VCPU_GUEST
 
 Flag to request the guest VCPU mask
+
+=item Sys::Virt::Domain::VCPU_HOTPLUGGABLE
+
+Flag to make vcpus added hot(un)pluggable
 
 =back
 
@@ -3104,6 +3285,16 @@ method.
 =item Sys::Virt::Domain::EVENT_ID_DEVICE_REMOVAL_FAILED
 
 Guest device removal has failed.
+
+=item Sys::Virt::Domain::EVENT_ID_METADATA_CHANGE
+
+The domain metadata has changed
+
+=item Sys::Virt::Domain::EVENT_ID_BLOCK_THRESHOLD
+
+The event occurs when the hypervisor detects that the given
+storage element was written beyond the point specified by
+threshold. The event is useful for thin-provisioned storage.
 
 =back
 
@@ -3593,6 +3784,14 @@ Available memory
 
 Actual balloon limit
 
+=item Sys::Virt::Domain::MEMORY_STAT_USABLE
+
+Amount of usable memory
+
+=item Sys::Virt::Domain::MEMORY_STAT_LAST_UPDATE
+
+Time of last stats refresh from guest
+
 =back
 
 =head2 DOMAIN LIST CONSTANTS
@@ -3758,6 +3957,14 @@ The duration of the time period for scheduling the emulator
 =item Sys::Virt::SCHEDULER_EMULATOR_QUOTA
 
 The quota for the emulator in one schedular time period
+
+=item Sys::Virt::SCHEDULER_IOTHREAD_PERIOD
+
+The duration of the time period for scheduling the iothread
+
+=item Sys::Virt::SCHEDULER_IOTHREAD_QUOTA
+
+The quota for the iothread in one schedular time period
 
 =back
 
@@ -4140,6 +4347,14 @@ Emulator thread CPU period
 
 Emulator thread CPU quota
 
+=item Sys::Virt::Domain::TUNABLE_CPU_IOTHREAD_PERIOD
+
+Iothread thread CPU period
+
+=item Sys::Virt::Domain::TUNABLE_CPU_IOTHREAD_QUOTA
+
+Iothread thread CPU quota
+
 =item Sys::Virt::Domain::TUNABLE_CPU_VCPUPIN
 
 VCPU thread pinning mask
@@ -4215,6 +4430,35 @@ Maximum write throughput in I/O operations per sec
 =item Sys::Virt::Domain::TUNABLE_BLKDEV_SIZE_IOPS_SEC
 
 The maximum I/O operations per second
+
+=item Sys::Virt::Domain::TUNABLE_BLKDEV_TOTAL_BYTES_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum total bytes processed per second.
+
+=item Sys::Virt::Domain::TUNABLE_BLKDEV_READ_BYTES_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum bytes read per second.
+
+=item Sys::Virt::Domain::TUNABLE_BLKDEV_WRITE_BYTES_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum bytes written per second.
+
+=item Sys::Virt::Domain::TUNABLE_BLKDEV_TOTAL_IOPS_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum total I/O operations processed
+per second.
+
+=item Sys::Virt::Domain::TUNABLE_BLKDEV_READ_IOPS_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum I/O operations read per second.
+
+=item Sys::Virt::Domain::TUNABLE_BLKDEV_WRITE_IOPS_SEC_MAX_LENGTH
+
+The duration in seconds allowed for maximum I/O operations written per second.
+
+=item Sys::Virt::Domain::TUNABLE_BLKDEV_GROUP_NAME
+
+The name of the blkdev group
 
 =item Sys::Virt::Domain::TUNABLE_IOTHREADSPIN
 

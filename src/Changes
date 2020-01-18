@@ -1,5 +1,71 @@
 Revision history for perl module Sys::Virt
 
+3.2.0 2017-04-03
+
+ - Add PERF_PARAM_CPU_CLOCK constant
+ - Add PERF_PARAM_TASK_CLOCK constant
+ - Add PERF_PARAM_PAGE_FAULTS constant
+ - Add PERF_PARAM_CONTEXT_SWITCHES constant
+ - Add PERF_PARAM_CPU_MIGRATIONS constant
+ - Add PERF_PARAM_PAGE_FAULTS_MIN constant
+ - Add PERF_PARAM_PAGE_FAULTS_MAJ constant
+ - Add PERF_PARAM_ALIGNMENT_FAULTS constant
+ - Add PERF_PARAM_EMULATION_FAULTS constant
+ - Add block threshold event
+ - Add virDomainSetBlockThreshold API
+ - Add VIR_MIGRATE_TLS constant
+
+3.1.0 2017-03-03
+
+ - Add VIR_CONNECT_LIST_STORAGE_POOLS_VSTORAGE constant
+ - Add VIR_CONNECT_LIST_NODE_DEVICES_CAP_DRM constant
+ - Add virDomainSetVcpu API
+
+3.0.0 2017-01-19
+
+ - Add group_name for block iotune
+ - Add new branch instructions perf event
+ - Add PERF_PARAM_BRANCH_MISSES constant
+ - Add PERF_PARAM_BUS_CYCLES constant
+ - Add PERF_PARAM_STALLED_CYCLES_FRONTEND constant
+ - Add PERF_PARAM_STALLED_CYCLES_BACKEND constant
+ - Add PERF_PARAM_REF_CPU_CYCLES constant
+ - Add virStorageVolGetInfoFlags & associated constants
+ - Add domain metdata change event
+ - Add secret event APIs
+
+2.5.0 2016-12-05
+
+ - Add VIR_ERR_LIBSSH and VIR_FROM_LIBSSH constants
+
+2.4.0 2016-11-02
+
+ - Add VIR_DOMAIN_VCPU_HOTPLUGGABLE constant
+ - Add constants for the new block iotune parameters for length
+
+2.3.0 2016-10-06
+
+ - Add PERF_PARAM_CACHE_MISSES, PERF_PARAM_CACHE_REFERENCES,
+   PERF_PARAM_CPU_CYCLES, PERF_PARAM_INSTRUCTIONS constants
+ - Add USAGE_TYPE_TLS
+ - Add ERR_AGENT_UNSYNCED
+ - Add VIR_DOMAIN_UNDEFINE_KEEP_NVRAM constant
+
+2.2.0 2016-09-05
+
+ - Add virConnectNodeDeviceEventRegisterAny and
+   virConnectNodeDeviceEventDeregisterAny and associated
+   constants
+ - Add new I/O thread tuning constants
+ - Add VIR_NODE_DEVICE_EVENT_ID_UPDATE constant
+
+2.1.0 2016-08-02
+
+ - Add VIR_DOMAIN_MEMORY_STAT_USABLE and
+   VIR_DOMAIN_MEMORY_STAT_LAST_UPDATE constants
+ - Fix handling of VIR_DOMAIN_AFFECT_LIVE |
+   VIR_DOMAIN_AFFECT_CONFIG with setter methods
+
 2.0.0 2016-07-01
 
  - Add VIR_MIGRATE_PARAM_AUTO_CONVERGE_INITIAL and

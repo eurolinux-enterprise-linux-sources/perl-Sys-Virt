@@ -1,5 +1,5 @@
 Name:           perl-Sys-Virt
-Version:        2.0.0
+Version:        3.2.0
 Release:        1%{?dist}
 Summary:        Represent and manage a libvirt hypervisor connection
 License:        GPLv2+ or Artistic
@@ -62,6 +62,18 @@ make test
 %{_mandir}/man3/*
 
 %changelog
+* Mon Apr  3 2017 Daniel P. Berrange <berrange@redhat.com> - 3.2.0-1
+- Rebase to 3.2.0 release (rhbz #1382643)
+
+* Fri Mar  3 2017 Daniel P. Berrange <berrange@redhat.com> - 3.1.0-1
+- Rebase to 3.1.0 release (rhbz #1382643)
+
+* Tue Feb  7 2017 Daniel P. Berrange <berrange@redhat.com> - 3.0.0-1
+- Rebase to 3.0.0 release (rhbz #1382643)
+
+* Wed Dec  7 2016 Daniel P. Berrange <berrange@redhat.com> - 2.5.0-1
+- Rebase to 2.5.0 release (rhbz #1382643)
+
 * Fri Jul  1 2016 Daniel P. Berrange <berrange@redhat.com> - 2.0.0-1
 - Rebase to 2.0.0 release (rhbz #1286682)
 
