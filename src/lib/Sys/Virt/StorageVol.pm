@@ -175,6 +175,10 @@ The volume is a network source
 
 The volume is a network directory
 
+=item Sys::Virt::StorageVol::TYPE_PLOOP
+
+The volume is a ploop directory
+
 =back
 
 =head2 CREATE MODES
@@ -208,6 +212,10 @@ Do a plain delete without any attempt to scrub data.
 =item Sys::Virt::StorageVol::DELETE_ZEROED
 
 Zero out current allocated blocks when deleteing the volume
+
+=item Sys::Virt::StorageVol::DELETE_WITH_SNAPSHOTS
+
+Delete snapshots associated with the volume
 
 =back
 
@@ -255,6 +263,10 @@ Cryptography" (1996)
 =item Sys::Virt::StorageVol::WIPE_ALG_ZERO
 
 1-pass, all zeroes
+
+=item Sys::Virt::StorageVol::WIPE_ALG_TRIM
+
+1-pass, trim all data on the volume by using TRIM or DISCARD
 
 =back
 

@@ -355,6 +355,34 @@ Overwrite existing storage pool data
 
 =back
 
+=head2 CREATE MODES
+
+When creating a storage pool it can be built at the same time.
+The following values are therefore close to their BUILD
+counterparts.
+
+=over 4
+
+=item Sys::Virt::StoragePool::CREATE_NORMAL
+
+Just create the storage pool without building it.
+
+=item Sys::Virt::StoragePool::CREATE_WITH_BUILD
+
+When creating new storage pool also perform pool build without any flags.
+
+=item Sys::Virt::StoragePool::CREATE_WITH_BUILD_OVERWRITE
+
+Create the pool and perform pool build using the BUILD_OVERWRITE
+flag. This is mutually exclusive to CREATE_WITH_BUILD_NO_OVERWRITE.
+
+=item Sys::Virt::StoragePool::CREATE_WITH_BUILD_NO_OVERWRITE
+
+Create the pool and perform pool build using the BUILD_NO_OVERWRITE
+flag. This is mutually exclusive to CREATE_WITH_BUILD_OVERWRITE.
+
+=back
+
 =head2 XML DOCUMENTS
 
 The following constants are useful when requesting
@@ -446,6 +474,47 @@ Include gluster storage pools
 =item Sys::Virt::StoragePool::LIST_ZFS
 
 Include ZFS storage pools
+
+=back
+
+=head2 EVENT ID CONSTANTS
+
+=over 4
+
+=item Sys::Virt::StoragePool::EVENT_ID_LIFECYCLE
+
+Storage pool lifecycle events
+
+=item Sys::Virt::StoragePool::EVENT_ID_REFRESH
+
+Storage pool volume refresh events
+
+=back
+
+=head2 LIFECYCLE CHANGE EVENTS
+
+The following constants allow network lifecycle change events to be
+interpreted. The events contain both a state change, and a
+reason though the reason is currently unsed.
+
+=over 4
+
+=item Sys::Virt::StoragePool::EVENT_DEFINED
+
+Indicates that a persistent configuration has been defined for
+the network.
+
+=item Sys::Virt::StoragePool::EVENT_STARTED
+
+The network has started running
+
+=item Sys::Virt::StoragePool::EVENT_STOPPED
+
+The network has stopped running
+
+=item Sys::Virt::StoragePool::EVENT_UNDEFINED
+
+The persistent configuration has gone away
 
 =back
 

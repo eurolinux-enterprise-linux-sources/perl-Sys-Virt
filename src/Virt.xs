@@ -159,7 +159,7 @@ _populate_constant_ull(HV *stash, const char *name, unsigned long long val)
 #define REGISTER_CONSTANT_ULL(name, key) _populate_constant_ull(stash, #key, name)
 
 static HV *
-vir_typed_param_to_hv(virTypedParameter *params, int nparams)
+vir_typed_param_to_hv(virTypedParameterPtr params, int nparams)
 {
     HV *ret = (HV *)sv_2mortal((SV*)newHV());
     unsigned int i;
@@ -210,7 +210,7 @@ vir_typed_param_to_hv(virTypedParameter *params, int nparams)
 
 
 static int
-vir_typed_param_from_hv(HV *newparams, virTypedParameter *params, int nparams)
+vir_typed_param_from_hv(HV *newparams, virTypedParameterPtr params, int nparams)
 {
     unsigned int i;
     char * ptr;
@@ -274,7 +274,7 @@ vir_typed_param_from_hv(HV *newparams, virTypedParameter *params, int nparams)
 
 static void
 vir_typed_param_add_string_list_from_hv(HV *newparams,
-					virTypedParameter **params,
+					virTypedParameterPtr *params,
 					int *nparams,
 					const char *key)
 {
@@ -282,7 +282,7 @@ vir_typed_param_add_string_list_from_hv(HV *newparams,
         return;
     }
     SSize_t nstr, i;
-    virTypedParameter *localparams = *params;
+    virTypedParameterPtr localparams = *params;
 
     SV **val = hv_fetch(newparams, key, strlen(key), 0);
     AV *av = (AV*)(SvRV(*val));
@@ -297,6 +297,7 @@ vir_typed_param_add_string_list_from_hv(HV *newparams,
 
       strncpy(localparams[*nparams + i].field, key,
 	      VIR_TYPED_PARAM_FIELD_LENGTH);
+      localparams[*nparams + i].field[VIR_TYPED_PARAM_FIELD_LENGTH - 1] = '\0';
 
       localparams[*nparams + i].type = VIR_TYPED_PARAM_STRING;
       localparams[*nparams + i].value.s = ptr;
@@ -893,45 +894,7 @@ _domain_event_balloonchange_callback(virConnectPtr con,
 
 
 static int
-_domain_event_device_added_callback(virConnectPtr con,
-                                    virDomainPtr dom,
-                                    const char *devAlias,
-                                    void *opaque)
-{
-    AV *data = opaque;
-    SV **self;
-    SV **cb;
-    SV *domref;
-    dSP;
-
-    self = av_fetch(data, 0, 0);
-    cb = av_fetch(data, 1, 0);
-
-    SvREFCNT_inc(*self);
-
-    ENTER;
-    SAVETMPS;
-
-    PUSHMARK(SP);
-    XPUSHs(*self);
-    domref = sv_newmortal();
-    sv_setref_pv(domref, "Sys::Virt::Domain", (void*)dom);
-    virDomainRef(dom);
-    XPUSHs(domref);
-    XPUSHs(sv_2mortal(newSVpv(devAlias, 0)));
-    PUTBACK;
-
-    call_sv(*cb, G_DISCARD);
-
-    FREETMPS;
-    LEAVE;
-
-    return 0;
-}
-
-
-static int
-_domain_event_device_removed_callback(virConnectPtr con,
+_domain_event_device_generic_callback(virConnectPtr con,
                                       virDomainPtr dom,
                                       const char *devAlias,
                                       void *opaque)
@@ -1052,6 +1015,87 @@ _domain_event_agent_lifecycle_callback(virConnectPtr con,
 
 
 static int
+_domain_event_migration_iteration_callback(virConnectPtr con,
+					   virDomainPtr dom,
+					   int iteration,
+					   void *opaque)
+{
+    AV *data = opaque;
+    SV **self;
+    SV **cb;
+    SV *domref;
+    dSP;
+
+    self = av_fetch(data, 0, 0);
+    cb = av_fetch(data, 1, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    domref = sv_newmortal();
+    sv_setref_pv(domref, "Sys::Virt::Domain", (void*)dom);
+    virDomainRef(dom);
+    XPUSHs(domref);
+    XPUSHs(sv_2mortal(newSViv(iteration)));
+    PUTBACK;
+
+    call_sv(*cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+
+    return 0;
+}
+
+
+static int
+_domain_event_job_completed_callback(virConnectPtr con,
+				     virDomainPtr dom,
+				     virTypedParameterPtr params,
+				     int nparams,
+				     void *opaque)
+{
+    AV *data = opaque;
+    SV **self;
+    SV **cb;
+    HV *params_hv;
+    SV *domref;
+    dSP;
+
+    self = av_fetch(data, 0, 0);
+    cb = av_fetch(data, 1, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    domref = sv_newmortal();
+    sv_setref_pv(domref, "Sys::Virt::Domain", (void*)dom);
+    virDomainRef(dom);
+
+    params_hv = vir_typed_param_to_hv(params, nparams);
+
+    XPUSHs(domref);
+    XPUSHs(newRV(( SV*)params_hv));
+    PUTBACK;
+
+    call_sv(*cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+
+    return 0;
+}
+
+
+static int
 _network_event_lifecycle_callback(virConnectPtr con,
 				  virNetworkPtr net,
 				  int event,
@@ -1127,6 +1171,82 @@ _network_event_generic_callback(virConnectPtr con,
 }
 
 
+static int
+_storage_pool_event_generic_callback(virConnectPtr con,
+				     virStoragePoolPtr pool,
+				     void *opaque)
+{
+    AV *data = opaque;
+    SV **self;
+    SV **cb;
+    SV *poolref;
+    dSP;
+
+    self = av_fetch(data, 0, 0);
+    cb = av_fetch(data, 1, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    poolref = sv_newmortal();
+    sv_setref_pv(poolref, "Sys::Virt::StoragePool", (void*)pool);
+    virStoragePoolRef(pool);
+    XPUSHs(poolref);
+    PUTBACK;
+
+    call_sv(*cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+
+    return 0;
+}
+
+
+static int
+_storage_pool_event_lifecycle_callback(virConnectPtr con,
+				       virStoragePoolPtr pool,
+				       int event,
+				       int detail,
+				       void *opaque)
+{
+    AV *data = opaque;
+    SV **self;
+    SV **cb;
+    SV *poolref;
+    dSP;
+
+    self = av_fetch(data, 0, 0);
+    cb = av_fetch(data, 1, 0);
+
+    SvREFCNT_inc(*self);
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(*self);
+    poolref = sv_newmortal();
+    sv_setref_pv(poolref, "Sys::Virt::StoragePool", (void*)pool);
+    virStoragePoolRef(pool);
+    XPUSHs(poolref);
+    XPUSHs(sv_2mortal(newSViv(event)));
+    XPUSHs(sv_2mortal(newSViv(detail)));
+    PUTBACK;
+
+    call_sv(*cb, G_DISCARD);
+
+    FREETMPS;
+    LEAVE;
+
+    return 0;
+}
+
+
 static void
 _domain_event_free(void *opaque)
 {
@@ -1137,6 +1257,14 @@ _domain_event_free(void *opaque)
 
 static void
 _network_event_free(void *opaque)
+{
+  SV *sv = opaque;
+  SvREFCNT_dec(sv);
+}
+
+
+static void
+_storage_pool_event_free(void *opaque)
 {
   SV *sv = opaque;
   SvREFCNT_dec(sv);
@@ -2108,7 +2236,7 @@ get_node_memory_parameters(conn, flags=0)
       virConnectPtr conn;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     CODE:
       nparams = 0;
@@ -2134,7 +2262,7 @@ set_node_memory_parameters(conn, newparams, flags=0)
       HV *newparams;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     PPCODE:
       nparams = 0;
@@ -3016,16 +3144,25 @@ PREINIT:
           callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_balloonchange_callback);
           break;
       case VIR_DOMAIN_EVENT_ID_DEVICE_ADDED:
-          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_device_added_callback);
+          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_device_generic_callback);
           break;
       case VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED:
-          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_device_removed_callback);
+          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_device_generic_callback);
           break;
       case VIR_DOMAIN_EVENT_ID_TUNABLE:
           callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_tunable_callback);
           break;
       case VIR_DOMAIN_EVENT_ID_AGENT_LIFECYCLE:
           callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_agent_lifecycle_callback);
+          break;
+      case VIR_DOMAIN_EVENT_ID_MIGRATION_ITERATION:
+          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_migration_iteration_callback);
+          break;
+      case VIR_DOMAIN_EVENT_ID_JOB_COMPLETED:
+          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_job_completed_callback);
+          break;
+      case VIR_DOMAIN_EVENT_ID_DEVICE_REMOVAL_FAILED:
+          callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_device_generic_callback);
           break;
       default:
           callback = VIR_DOMAIN_EVENT_CALLBACK(_domain_event_generic_callback);
@@ -3096,6 +3233,56 @@ network_event_deregister_any(con, callbackID)
       int callbackID;
  PPCODE:
       virConnectNetworkEventDeregisterAny(con, callbackID);
+
+
+int
+storage_pool_event_register_any(conref, poolref, eventID, cb)
+      SV* conref;
+      SV* poolref;
+      int eventID;
+      SV* cb;
+PREINIT:
+      AV *opaque;
+      virConnectPtr con;
+      virStoragePoolPtr net;
+      virConnectStoragePoolEventGenericCallback callback;
+    CODE:
+      con = (virConnectPtr)SvIV((SV*)SvRV(conref));
+      if (SvROK(poolref)) {
+          net = (virStoragePoolPtr)SvIV((SV*)SvRV(poolref));
+      } else {
+          net = NULL;
+      }
+
+      switch (eventID) {
+      case VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE:
+          callback = VIR_STORAGE_POOL_EVENT_CALLBACK(_storage_pool_event_lifecycle_callback);
+          break;
+      case VIR_STORAGE_POOL_EVENT_ID_REFRESH:
+          callback = VIR_STORAGE_POOL_EVENT_CALLBACK(_storage_pool_event_generic_callback);
+          break;
+      default:
+          callback = VIR_STORAGE_POOL_EVENT_CALLBACK(_storage_pool_event_generic_callback);
+          break;
+      }
+
+      opaque = newAV();
+      SvREFCNT_inc(cb);
+      SvREFCNT_inc(conref);
+      av_push(opaque, conref);
+      av_push(opaque, cb);
+      if ((RETVAL = virConnectStoragePoolEventRegisterAny(con, net, eventID, callback, opaque, _storage_pool_event_free)) < 0)
+          _croak_error();
+OUTPUT:
+      RETVAL
+
+
+void
+storage_pool_event_deregister_any(con, callbackID)
+      virConnectPtr con;
+      int callbackID;
+ PPCODE:
+      virConnectStoragePoolEventDeregisterAny(con, callbackID);
 
 
 void
@@ -3566,6 +3753,15 @@ set_user_password(dom, username, password, flags=0)
       if (virDomainSetUserPassword(dom, username, password, flags) < 0)
 	_croak_error();
 
+void
+rename(dom, newname, flags=0)
+      virDomainPtr dom;
+      const char *newname;
+      unsigned int flags;
+  PPCODE:
+      if (virDomainRename(dom, newname, flags) < 0)
+	_croak_error();
+
 HV *
 get_control_info(dom, flags=0)
       virDomainPtr dom;
@@ -3722,7 +3918,7 @@ get_job_stats(dom, flags=0)
       unsigned int flags;
   PREINIT:
       int type;
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
       HV *paramsHv;
       SV *typeSv;
@@ -3821,7 +4017,7 @@ block_copy(dom, path, destxml, newparams, flags=0)
       HV *newparams;
       unsigned long flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
   PPCODE:
       nparams = 3;
@@ -3896,7 +4092,7 @@ get_scheduler_parameters(dom, flags=0)
       virDomainPtr dom;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
       char *type;
     CODE:
@@ -3928,7 +4124,7 @@ set_scheduler_parameters(dom, newparams, flags=0)
       HV *newparams;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
       char *type;
     PPCODE:
@@ -3964,14 +4160,14 @@ get_memory_parameters(dom, flags=0)
       virDomainPtr dom;
       unsigned int flags;
   PREINIT:
-      virMemoryParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     CODE:
       nparams = 0;
       if (virDomainGetMemoryParameters(dom, NULL, &nparams, flags) < 0)
           _croak_error();
 
-      Newx(params, nparams, virMemoryParameter);
+      Newx(params, nparams, virTypedParameter);
 
       if (virDomainGetMemoryParameters(dom, params, &nparams, flags) < 0) {
           Safefree(params);
@@ -3990,14 +4186,14 @@ set_memory_parameters(dom, newparams, flags=0)
       HV *newparams;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     PPCODE:
       nparams = 0;
       if (virDomainGetMemoryParameters(dom, NULL, &nparams, flags) < 0)
           _croak_error();
 
-      Newx(params, nparams, virMemoryParameter);
+      Newx(params, nparams, virTypedParameter);
 
       if (virDomainGetMemoryParameters(dom, params, &nparams, flags) < 0) {
           Safefree(params);
@@ -4016,7 +4212,7 @@ get_numa_parameters(dom, flags=0)
       virDomainPtr dom;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     CODE:
       nparams = 0;
@@ -4042,7 +4238,7 @@ set_numa_parameters(dom, newparams, flags=0)
       HV *newparams;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     PPCODE:
       nparams = 0;
@@ -4068,7 +4264,7 @@ get_blkio_parameters(dom, flags=0)
       virDomainPtr dom;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     CODE:
       nparams = 0;
@@ -4094,7 +4290,7 @@ set_blkio_parameters(dom, newparams, flags=0)
       HV *newparams;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     PPCODE:
       nparams = 0;
@@ -4112,6 +4308,46 @@ set_blkio_parameters(dom, newparams, flags=0)
 
       if (virDomainSetBlkioParameters(dom, params, nparams,
                                       flags) < 0)
+          _croak_error();
+      Safefree(params);
+
+
+HV *
+get_perf_events(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+  PREINIT:
+      virTypedParameterPtr params = NULL;
+      int nparams = 0;
+    CODE:
+      if (virDomainGetPerfEvents(dom, &params, &nparams, flags) < 0) {
+          Safefree(params);
+          _croak_error();
+      }
+
+      RETVAL = vir_typed_param_to_hv(params, nparams);
+      Safefree(params);
+  OUTPUT:
+      RETVAL
+
+
+void
+set_perf_events(dom, newparams, flags=0)
+      virDomainPtr dom;
+      HV *newparams;
+      unsigned int flags;
+  PREINIT:
+      virTypedParameterPtr params = NULL;
+      int nparams = 0;
+    PPCODE:
+      if (virDomainGetPerfEvents(dom, &params, &nparams, flags) < 0) {
+          Safefree(params);
+          _croak_error();
+      }
+
+      nparams = vir_typed_param_from_hv(newparams, params, nparams);
+
+      if (virDomainSetPerfEvents(dom, params, nparams, flags) < 0)
           _croak_error();
       Safefree(params);
 
@@ -4194,6 +4430,34 @@ get_vcpus(dom, flags=0)
         _croak_error();
 OUTPUT:
     RETVAL
+
+
+void
+set_guest_vcpus(dom, cpumap, state, flags=0)
+      virDomainPtr dom;
+      const char *cpumap;
+      int state;
+      unsigned int flags;
+  PPCODE:
+      if (virDomainSetGuestVcpus(dom, cpumap, state, flags) < 0)
+          _croak_error();
+
+
+HV *
+get_guest_vcpus(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+  PREINIT:
+      virTypedParameterPtr params;
+      unsigned int nparams;
+    CODE:
+      if (virDomainGetGuestVcpus(dom, &params, &nparams, flags) < 0) {
+          _croak_error();
+      }
+      RETVAL = vir_typed_param_to_hv(params, nparams);
+      virTypedParamsFree(params, nparams);
+  OUTPUT:
+      RETVAL
 
 
 void
@@ -4379,10 +4643,10 @@ _migrate(dom, destcon, newparams, flags=0)
      HV *newparams;
      unsigned long flags;
   PREINIT:
-     virTypedParameter *params;
+     virTypedParameterPtr params;
      int nparams;
     CODE:
-     nparams = 6;
+     nparams = 15;
      Newx(params, nparams, virTypedParameter);
 
      strncpy(params[0].field, VIR_MIGRATE_PARAM_URI,
@@ -4408,6 +4672,42 @@ _migrate(dom, destcon, newparams, flags=0)
      strncpy(params[5].field, VIR_MIGRATE_PARAM_LISTEN_ADDRESS,
              VIR_TYPED_PARAM_FIELD_LENGTH);
      params[5].type = VIR_TYPED_PARAM_STRING;
+
+     strncpy(params[6].field, VIR_MIGRATE_PARAM_DISKS_PORT,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[6].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[7].field, VIR_MIGRATE_PARAM_COMPRESSION,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[7].type = VIR_TYPED_PARAM_STRING;
+
+     strncpy(params[8].field, VIR_MIGRATE_PARAM_COMPRESSION_MT_DTHREADS,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[8].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[9].field, VIR_MIGRATE_PARAM_COMPRESSION_MT_LEVEL,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[9].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[10].field, VIR_MIGRATE_PARAM_COMPRESSION_MT_THREADS,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[10].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[11].field, VIR_MIGRATE_PARAM_COMPRESSION_XBZRLE_CACHE,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[11].type = VIR_TYPED_PARAM_ULLONG;
+
+     strncpy(params[12].field, VIR_MIGRATE_PARAM_PERSIST_XML,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[12].type = VIR_TYPED_PARAM_STRING;
+
+     strncpy(params[13].field, VIR_MIGRATE_PARAM_AUTO_CONVERGE_INITIAL,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[13].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[14].field, VIR_MIGRATE_PARAM_AUTO_CONVERGE_INCREMENT,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[14].type = VIR_TYPED_PARAM_INT;
 
      nparams = vir_typed_param_from_hv(newparams, params, nparams);
 
@@ -4434,10 +4734,10 @@ _migrate_to_uri(dom, desturi, newparams, flags=0)
      HV *newparams;
      unsigned long flags;
   PREINIT:
-     virTypedParameter *params;
+     virTypedParameterPtr params;
      int nparams;
   PPCODE:
-     nparams = 6;
+     nparams = 15;
      Newx(params, nparams, virTypedParameter);
 
      strncpy(params[0].field, VIR_MIGRATE_PARAM_URI,
@@ -4463,6 +4763,42 @@ _migrate_to_uri(dom, desturi, newparams, flags=0)
      strncpy(params[5].field, VIR_MIGRATE_PARAM_LISTEN_ADDRESS,
              VIR_TYPED_PARAM_FIELD_LENGTH);
      params[5].type = VIR_TYPED_PARAM_STRING;
+
+     strncpy(params[6].field, VIR_MIGRATE_PARAM_DISKS_PORT,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[6].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[7].field, VIR_MIGRATE_PARAM_COMPRESSION,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[7].type = VIR_TYPED_PARAM_STRING;
+
+     strncpy(params[8].field, VIR_MIGRATE_PARAM_COMPRESSION_MT_DTHREADS,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[8].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[9].field, VIR_MIGRATE_PARAM_COMPRESSION_MT_LEVEL,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[9].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[10].field, VIR_MIGRATE_PARAM_COMPRESSION_MT_THREADS,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[10].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[11].field, VIR_MIGRATE_PARAM_COMPRESSION_XBZRLE_CACHE,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[11].type = VIR_TYPED_PARAM_ULLONG;
+
+     strncpy(params[12].field, VIR_MIGRATE_PARAM_PERSIST_XML,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[12].type = VIR_TYPED_PARAM_STRING;
+
+     strncpy(params[13].field, VIR_MIGRATE_PARAM_AUTO_CONVERGE_INITIAL,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[13].type = VIR_TYPED_PARAM_INT;
+
+     strncpy(params[14].field, VIR_MIGRATE_PARAM_AUTO_CONVERGE_INCREMENT,
+             VIR_TYPED_PARAM_FIELD_LENGTH);
+     params[14].type = VIR_TYPED_PARAM_INT;
 
      nparams = vir_typed_param_from_hv(newparams, params, nparams);
 
@@ -4547,6 +4883,15 @@ migrate_get_compression_cache(dom, flags=0)
 
 
 void
+migrate_start_post_copy(dom, flags=0)
+      virDomainPtr dom;
+      unsigned int flags;
+  PPCODE:
+      if (virDomainMigrateStartPostCopy(dom, flags) < 0)
+          _croak_error();
+
+
+void
 attach_device(dom, xml, flags=0)
       virDomainPtr dom;
       const char *xml;
@@ -4592,7 +4937,7 @@ get_block_iotune(dom, disk, flags=0)
       const char *disk;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     CODE:
       nparams = 0;
@@ -4619,7 +4964,7 @@ set_block_iotune(dom, disk, newparams, flags=0)
       HV *newparams;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
   PPCODE:
       nparams = 0;
@@ -4643,7 +4988,7 @@ get_interface_parameters(dom, intf, flags=0)
       const char *intf;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
     CODE:
       nparams = 0;
@@ -4670,7 +5015,7 @@ set_interface_parameters(dom, intf, newparams, flags=0)
       HV *newparams;
       unsigned int flags;
   PREINIT:
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
   PPCODE:
       nparams = 0;
@@ -4695,7 +5040,7 @@ block_stats(dom, path, flags=0)
       unsigned int flags;
   PREINIT:
       virDomainBlockStatsStruct stats;
-      virTypedParameter *params;
+      virTypedParameterPtr params;
       int nparams;
       unsigned int i;
       const char *field;
@@ -4815,7 +5160,7 @@ memory_stats(dom, flags=0)
               break;
 
           case VIR_DOMAIN_MEMORY_STAT_RSS:
-              (void)hv_store (RETVAL, "rss", 14, virt_newSVll(stats[i].val), 0);
+              (void)hv_store (RETVAL, "rss", 3, virt_newSVll(stats[i].val), 0);
               break;
           }
       }
@@ -7405,6 +7750,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_SAVE_CANCELED, STATE_RUNNING_SAVE_CANCELED);
       REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_WAKEUP, STATE_RUNNING_WAKEUP);
       REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_CRASHED, STATE_RUNNING_CRASHED);
+      REGISTER_CONSTANT(VIR_DOMAIN_RUNNING_POSTCOPY, STATE_RUNNING_POSTCOPY);
 
       REGISTER_CONSTANT(VIR_DOMAIN_BLOCKED_UNKNOWN, STATE_BLOCKED_UNKNOWN);
 
@@ -7420,6 +7766,8 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_SNAPSHOT, STATE_PAUSED_SNAPSHOT);
       REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_CRASHED, STATE_PAUSED_CRASHED);
       REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_STARTING_UP, STATE_PAUSED_STARTING_UP);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_POSTCOPY, STATE_PAUSED_POSTCOPY);
+      REGISTER_CONSTANT(VIR_DOMAIN_PAUSED_POSTCOPY_FAILED, STATE_PAUSED_POSTCOPY_FAILED);
 
       REGISTER_CONSTANT(VIR_DOMAIN_SHUTDOWN_UNKNOWN, STATE_SHUTDOWN_UNKNOWN);
       REGISTER_CONSTANT(VIR_DOMAIN_SHUTDOWN_USER, STATE_SHUTDOWN_USER);
@@ -7481,6 +7829,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_MIGRATE_ABORT_ON_ERROR, MIGRATE_ABORT_ON_ERROR);
       REGISTER_CONSTANT(VIR_MIGRATE_AUTO_CONVERGE, MIGRATE_AUTO_CONVERGE);
       REGISTER_CONSTANT(VIR_MIGRATE_RDMA_PIN_ALL, MIGRATE_RDMA_PIN_ALL);
+      REGISTER_CONSTANT(VIR_MIGRATE_POSTCOPY, MIGRATE_POSTCOPY);
 
       REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_BANDWIDTH, MIGRATE_PARAM_BANDWIDTH);
       REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_DEST_NAME, MIGRATE_PARAM_DEST_NAME);
@@ -7489,6 +7838,15 @@ BOOT:
       REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_URI, MIGRATE_PARAM_URI);
       REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_LISTEN_ADDRESS, MIGRATE_PARAM_LISTEN_ADDRESS);
       REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_MIGRATE_DISKS, MIGRATE_PARAM_MIGRATE_DISKS);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_DISKS_PORT, MIGRATE_PARAM_DISK_PORT);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_COMPRESSION, MIGRATE_PARAM_COMPRESSION);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_COMPRESSION_MT_THREADS, MIGRATE_PARAM_COMPRESSION_MT_THREADS);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_COMPRESSION_MT_DTHREADS, MIGRATE_PARAM_COMPRESSION_MT_DTHREADS);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_COMPRESSION_MT_LEVEL, MIGRATE_PARAM_COMPRESSION_MT_LEVEL);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_COMPRESSION_XBZRLE_CACHE, MIGRATE_PARAM_COMPRESSION_XBZRLE_CACHE);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_PERSIST_XML, MIGRATE_PARAM_PERSIST_XML);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_AUTO_CONVERGE_INITIAL, MIGRATE_PARAM_AUTO_CONVERGE_INITIAL);
+      REGISTER_CONSTANT_STR(VIR_MIGRATE_PARAM_AUTO_CONVERGE_INCREMENT, MIGRATE_PARAM_AUTO_CONVERGE_INCREMENT);
 
       REGISTER_CONSTANT(VIR_DOMAIN_XML_SECURE, XML_SECURE);
       REGISTER_CONSTANT(VIR_DOMAIN_XML_INACTIVE, XML_INACTIVE);
@@ -7522,6 +7880,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_STATS_INTERFACE, STATS_INTERFACE);
       REGISTER_CONSTANT(VIR_DOMAIN_STATS_STATE, STATS_STATE);
       REGISTER_CONSTANT(VIR_DOMAIN_STATS_VCPU, STATS_VCPU);
+      REGISTER_CONSTANT(VIR_DOMAIN_STATS_PERF, STATS_PERF);
 
       REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_ACTIVE, GET_ALL_STATS_ACTIVE);
       REGISTER_CONSTANT(VIR_CONNECT_GET_ALL_DOMAINS_STATS_INACTIVE, GET_ALL_STATS_INACTIVE);
@@ -7547,8 +7906,11 @@ BOOT:
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_DEFINED_ADDED, EVENT_DEFINED_ADDED);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_DEFINED_UPDATED, EVENT_DEFINED_UPDATED);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_DEFINED_RENAMED, EVENT_DEFINED_RENAMED);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_DEFINED_FROM_SNAPSHOT, EVENT_DEFINED_FROM_SNAPSHOT);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_UNDEFINED_REMOVED, EVENT_UNDEFINED_REMOVED);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_UNDEFINED_RENAMED, EVENT_UNDEFINED_RENAMED);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_STARTED_BOOTED, EVENT_STARTED_BOOTED);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_STARTED_MIGRATED, EVENT_STARTED_MIGRATED);
@@ -7565,10 +7927,13 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SUSPENDED_RESTORED, EVENT_SUSPENDED_RESTORED);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SUSPENDED_FROM_SNAPSHOT, EVENT_SUSPENDED_FROM_SNAPSHOT);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SUSPENDED_API_ERROR, EVENT_SUSPENDED_API_ERROR);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SUSPENDED_POSTCOPY, EVENT_SUSPENDED_POSTCOPY);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_SUSPENDED_POSTCOPY_FAILED, EVENT_SUSPENDED_POSTCOPY_FAILED);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_RESUMED_UNPAUSED, EVENT_RESUMED_UNPAUSED);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_RESUMED_MIGRATED, EVENT_RESUMED_MIGRATED);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_RESUMED_FROM_SNAPSHOT, EVENT_RESUMED_FROM_SNAPSHOT);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_RESUMED_POSTCOPY, EVENT_RESUMED_POSTCOPY);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_STOPPED_SHUTDOWN, EVENT_STOPPED_SHUTDOWN);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_STOPPED_DESTROYED, EVENT_STOPPED_DESTROYED);
@@ -7619,6 +7984,7 @@ BOOT:
 
       REGISTER_CONSTANT(VIR_DOMAIN_JOB_STATS_COMPLETED, JOB_STATS_COMPLETED);
 
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_AUTO_CONVERGE_THROTTLE, JOB_AUTO_CONVERGE_THROTTLE);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_COMPRESSION_BYTES, JOB_COMPRESSION_BYTES);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_COMPRESSION_CACHE, JOB_COMPRESSION_CACHE);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_COMPRESSION_CACHE_MISSES, JOB_COMPRESSION_CACHE_MISSES);
@@ -7640,6 +8006,8 @@ BOOT:
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_REMAINING, JOB_MEMORY_REMAINING);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_TOTAL, JOB_MEMORY_TOTAL);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_BPS, JOB_MEMORY_BPS);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_DIRTY_RATE, JOB_MEMORY_DIRTY_RATE);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_MEMORY_ITERATION, JOB_MEMORY_ITERATION);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_SETUP_TIME, JOB_SETUP_TIME);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_TIME_ELAPSED, JOB_TIME_ELAPSED);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_JOB_TIME_ELAPSED_NET, JOB_TIME_ELAPSED_NET);
@@ -7682,6 +8050,9 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED, EVENT_ID_DEVICE_REMOVED);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_TUNABLE, EVENT_ID_TUNABLE);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_AGENT_LIFECYCLE, EVENT_ID_AGENT_LIFECYCLE);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_MIGRATION_ITERATION, EVENT_ID_MIGRATION_ITERATION);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_JOB_COMPLETED, EVENT_ID_JOB_COMPLETED);
+      REGISTER_CONSTANT(VIR_DOMAIN_EVENT_ID_DEVICE_REMOVAL_FAILED, EVENT_ID_DEVICE_REMOVAL_FAILED);
 
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_WATCHDOG_NONE, EVENT_WATCHDOG_NONE);
       REGISTER_CONSTANT(VIR_DOMAIN_EVENT_WATCHDOG_PAUSE, EVENT_WATCHDOG_PAUSE);
@@ -7732,6 +8103,8 @@ BOOT:
       REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_CPU_SHARES, SCHEDULER_CPU_SHARES);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_VCPU_PERIOD, SCHEDULER_VCPU_PERIOD);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_VCPU_QUOTA, SCHEDULER_VCPU_QUOTA);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_GLOBAL_PERIOD, SCHEDULER_GLOBAL_PERIOD);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_GLOBAL_QUOTA, SCHEDULER_GLOBAL_QUOTA);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_WEIGHT, SCHEDULER_WEIGHT);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_CAP, SCHEDULER_CAP);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_SCHEDULER_LIMIT, SCHEDULER_LIMIT);
@@ -7774,10 +8147,14 @@ BOOT:
       REGISTER_CONSTANT(VIR_DOMAIN_NUMATUNE_MEM_PREFERRED, NUMATUNE_MEM_PREFERRED);
       REGISTER_CONSTANT(VIR_DOMAIN_NUMATUNE_MEM_INTERLEAVE, NUMATUNE_MEM_INTERLEAVE);
 
+      REGISTER_CONSTANT_STR(VIR_PERF_PARAM_CMT, PERF_PARAM_CMT);
+      REGISTER_CONSTANT_STR(VIR_PERF_PARAM_MBML, PERF_PARAM_MBML);
+      REGISTER_CONSTANT_STR(VIR_PERF_PARAM_MBMT, PERF_PARAM_MBMT);
 
       REGISTER_CONSTANT_STR(VIR_DOMAIN_BANDWIDTH_IN_AVERAGE, BANDWIDTH_IN_AVERAGE);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_BANDWIDTH_IN_PEAK, BANDWIDTH_IN_PEAK);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_BANDWIDTH_IN_BURST, BANDWIDTH_IN_BURST);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_BANDWIDTH_IN_FLOOR, BANDWIDTH_IN_FLOOR);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_BANDWIDTH_OUT_AVERAGE, BANDWIDTH_OUT_AVERAGE);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_BANDWIDTH_OUT_PEAK, BANDWIDTH_OUT_PEAK);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_BANDWIDTH_OUT_BURST, BANDWIDTH_OUT_BURST);
@@ -7945,6 +8322,8 @@ BOOT:
       REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_CPU_VCPUPIN, TUNABLE_CPU_VCPUPIN);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_CPU_VCPU_PERIOD, TUNABLE_CPU_VCPU_PERIOD);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_CPU_VCPU_QUOTA, TUNABLE_CPU_VCPU_QUOTA);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_CPU_GLOBAL_PERIOD, TUNABLE_CPU_GLOBAL_PERIOD);
+      REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_CPU_GLOBAL_QUOTA, TUNABLE_CPU_GLOBAL_QUOTA);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_BLKDEV_DISK, TUNABLE_BLKDEV_DISK);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_BLKDEV_READ_BYTES_SEC, TUNABLE_BLKDEV_READ_BYTES_SEC);
       REGISTER_CONSTANT_STR(VIR_DOMAIN_TUNABLE_BLKDEV_READ_IOPS_SEC, TUNABLE_BLKDEV_READ_IOPS_SEC);
@@ -8013,6 +8392,11 @@ BOOT:
       REGISTER_CONSTANT(VIR_STORAGE_POOL_BUILD_NO_OVERWRITE, BUILD_NO_OVERWRITE);
       REGISTER_CONSTANT(VIR_STORAGE_POOL_BUILD_OVERWRITE, BUILD_OVERWRITE);
 
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_CREATE_NORMAL, CREATE_NORMAL);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_CREATE_WITH_BUILD, CREATE_WITH_BUILD);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_CREATE_WITH_BUILD_OVERWRITE, CREATE_WITH_BUILD_OVERWRITE);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_CREATE_WITH_BUILD_NO_OVERWRITE, CREATE_WITH_BUILD_NO_OVERWRITE);
+
       REGISTER_CONSTANT(VIR_STORAGE_POOL_DELETE_NORMAL, DELETE_NORMAL);
       REGISTER_CONSTANT(VIR_STORAGE_POOL_DELETE_ZEROED, DELETE_ZEROED);
 
@@ -8038,6 +8422,15 @@ BOOT:
       REGISTER_CONSTANT(VIR_CONNECT_LIST_STORAGE_POOLS_SHEEPDOG, LIST_SHEEPDOG);
       REGISTER_CONSTANT(VIR_CONNECT_LIST_STORAGE_POOLS_GLUSTER, LIST_GLUSTER);
       REGISTER_CONSTANT(VIR_CONNECT_LIST_STORAGE_POOLS_ZFS, LIST_ZFS);
+
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_ID_LIFECYCLE, EVENT_ID_LIFECYCLE);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_ID_REFRESH, EVENT_ID_REFRESH);
+
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_DEFINED, EVENT_DEFINED);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_UNDEFINED, EVENT_UNDEFINED);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_STARTED, EVENT_STARTED);
+      REGISTER_CONSTANT(VIR_STORAGE_POOL_EVENT_STOPPED, EVENT_STOPPED);
+
 
       stash = gv_stashpv( "Sys::Virt::Network", TRUE );
       REGISTER_CONSTANT(VIR_NETWORK_XML_INACTIVE, XML_INACTIVE);
@@ -8110,9 +8503,11 @@ BOOT:
       REGISTER_CONSTANT(VIR_STORAGE_VOL_DIR, TYPE_DIR);
       REGISTER_CONSTANT(VIR_STORAGE_VOL_NETWORK, TYPE_NETWORK);
       REGISTER_CONSTANT(VIR_STORAGE_VOL_NETDIR, TYPE_NETDIR);
+      REGISTER_CONSTANT(VIR_STORAGE_VOL_PLOOP, TYPE_PLOOP);
 
       REGISTER_CONSTANT(VIR_STORAGE_VOL_DELETE_NORMAL, DELETE_NORMAL);
       REGISTER_CONSTANT(VIR_STORAGE_VOL_DELETE_ZEROED, DELETE_ZEROED);
+      REGISTER_CONSTANT(VIR_STORAGE_VOL_DELETE_WITH_SNAPSHOTS, DELETE_WITH_SNAPSHOTS);
 
 
       REGISTER_CONSTANT(VIR_STORAGE_VOL_WIPE_ALG_ZERO, WIPE_ALG_ZERO);
@@ -8124,6 +8519,7 @@ BOOT:
       REGISTER_CONSTANT(VIR_STORAGE_VOL_WIPE_ALG_PFITZNER7, WIPE_ALG_PFITZNER7);
       REGISTER_CONSTANT(VIR_STORAGE_VOL_WIPE_ALG_PFITZNER33, WIPE_ALG_PFITZNER33);
       REGISTER_CONSTANT(VIR_STORAGE_VOL_WIPE_ALG_RANDOM, WIPE_ALG_RANDOM);
+      REGISTER_CONSTANT(VIR_STORAGE_VOL_WIPE_ALG_TRIM, WIPE_ALG_TRIM);
 
       REGISTER_CONSTANT(VIR_STORAGE_VOL_RESIZE_ALLOCATE, RESIZE_ALLOCATE);
       REGISTER_CONSTANT(VIR_STORAGE_VOL_RESIZE_DELTA, RESIZE_DELTA);
@@ -8225,6 +8621,9 @@ BOOT:
       REGISTER_CONSTANT(VIR_FROM_POLKIT, FROM_POLKIT);
       REGISTER_CONSTANT(VIR_FROM_THREAD, FROM_THREAD);
       REGISTER_CONSTANT(VIR_FROM_ADMIN, FROM_ADMIN);
+      REGISTER_CONSTANT(VIR_FROM_LOGGING, FROM_LOGGING);
+      REGISTER_CONSTANT(VIR_FROM_XENXL, FROM_XENXL);
+      REGISTER_CONSTANT(VIR_FROM_PERF, FROM_PERF);
 
 
       REGISTER_CONSTANT(VIR_ERR_OK, ERR_OK);
@@ -8320,4 +8719,8 @@ BOOT:
       REGISTER_CONSTANT(VIR_ERR_STORAGE_VOL_EXIST, ERR_STORAGE_VOL_EXIST);
       REGISTER_CONSTANT(VIR_ERR_CPU_INCOMPATIBLE, ERR_CPU_INCOMPATIBLE);
       REGISTER_CONSTANT(VIR_ERR_XML_INVALID_SCHEMA, ERR_INVALID_SCHEMA);
+      REGISTER_CONSTANT(VIR_ERR_MIGRATE_FINISH_OK, ERR_MIGRATE_FINISH_OK);
+      REGISTER_CONSTANT(VIR_ERR_AUTH_UNAVAILABLE, ERR_AUTH_UNAVAILABLE);
+      REGISTER_CONSTANT(VIR_ERR_NO_SERVER, ERR_NO_SERVER);
+      REGISTER_CONSTANT(VIR_ERR_NO_CLIENT, ERR_NO_CLIENT);
     }

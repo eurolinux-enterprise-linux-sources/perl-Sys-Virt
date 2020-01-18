@@ -1,17 +1,18 @@
 Name:           perl-Sys-Virt
-Version:        1.2.17
-Release:        2%{?dist}
+Version:        2.0.0
+Release:        1%{?dist}
 Summary:        Represent and manage a libvirt hypervisor connection
 License:        GPLv2+ or Artistic
-Group:          Development/Libraries
 URL:            http://search.cpan.org/dist/Sys-Virt/
 Source0:        http://www.cpan.org/authors/id/D/DA/DANBERR/Sys-Virt-%{version}.tar.gz
-Patch1: 0001-Add-VIR_ERR_MIGRATE_FINISH_OK-constant.patch
-Patch2: 0002-Ensure-typed-param-key-is-null-terminated.patch
-BuildRequires:  libvirt-devel >= %{version}
 # Build
+BuildRequires:  coreutils
+BuildRequires:  findutils
+BuildRequires:  libvirt-devel >= %{version}
+BuildRequires:  make
 BuildRequires:  perl
 BuildRequires:  perl(ExtUtils::MakeMaker)
+BuildRequires:  sed
 # Runtime
 BuildRequires:  perl(overload)
 BuildRequires:  perl(strict)
@@ -28,7 +29,7 @@ BuildRequires:  perl(XML::XPath::XMLParser)
 BuildRequires:  perl(Test::CPAN::Changes)
 BuildRequires:  perl(Test::Pod) >= 1.00
 BuildRequires:  perl(Test::Pod::Coverage) >= 1.00
-Requires:       perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
+Requires:       perl(:MODULE_COMPAT_%(eval "$(perl -V:version)"; echo $version))
 
 %description
 The Sys::Virt module provides a Perl XS binding to the libvirt virtual
@@ -37,8 +38,6 @@ virtualization containers to be managed with a consistent API.
 
 %prep
 %setup -q -n Sys-Virt-%{version}
-%patch1 -p1
-%patch2 -p1
 sed -i -e '/Sys-Virt\.spec/d' Makefile.PL
 sed -i -e '/\.spec\.PL$/d' MANIFEST
 rm -f *.spec.PL
@@ -49,7 +48,7 @@ make %{?_smp_mflags}
 
 %install
 make pure_install DESTDIR=%{buildroot}
-find %{buildroot} -type f -name '*.bs' -empty -exec rm -f {} +
+find %{buildroot} -type f -name '*.bs' -empty -delete
 %{_fixperms} %{buildroot}/*
 
 %check
@@ -63,6 +62,15 @@ make test
 %{_mandir}/man3/*
 
 %changelog
+* Fri Jul  1 2016 Daniel P. Berrange <berrange@redhat.com> - 2.0.0-1
+- Rebase to 2.0.0 release (rhbz #1286682)
+
+* Mon Apr 18 2016 Daniel P. Berrange <berrange@redhat.com> - 1.3.3-1
+- Rebase to 1.3.3 release (rhbz #1286682)
+
+* Wed Mar  9 2016 Daniel P. Berrange <berrange@redhat.com> - 1.3.2-1
+- Rebase to 1.3.2 release (rhbz #1286682)
+
 * Fri Jul 17 2015 Daniel P. Berrange <berrange@redhat.com> - 1.2.17-2
 - Avoid coverity strncpy() warning
 

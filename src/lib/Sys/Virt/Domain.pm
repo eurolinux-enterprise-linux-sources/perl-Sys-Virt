@@ -360,6 +360,14 @@ The guest is paused due to a kernel panic
 
 The guest is paused as it is being started up.
 
+=item Sys::Virt::Domain::STATE_PAUSED_POSTCOPY
+
+The guest is paused as post-copy migration is taking place
+
+=item Sys::Virt::Domain::STATE_PAUSED_POSTCOPY_FAILED
+
+The guest is paused as post-copy migration failed
+
 =item Sys::Virt::Domain::STATE_RUNNING_BOOTED
 
 The guest is running after being booted
@@ -399,6 +407,10 @@ The guest is running after wakeup from power management suspend
 =item Sys::Virt::Domain::STATE_RUNNING_CRASHED
 
 The guest was restarted after crashing
+
+=item Sys::Virt::Domain::STATE_RUNNING_POSTCOPY
+
+The guest is running but post-copy is taking place
 
 =item Sys::Virt::Domain::STATE_BLOCKED_UNKNOWN
 
@@ -513,6 +525,12 @@ The C<$password> is encrypted with the password scheme required
 by the guest OS.
 
 =back
+
+=item $dom->rename($newname, $flags=0)
+
+Change the name of an inactive guest to be C<$newname>.
+The C<$flags> parameter is currently unused and defaults
+to zero.
 
 =item my @errs = $dom->get_disk_errors($flags=0)
 
@@ -677,6 +695,40 @@ Get the number of virtual CPUs in the guest VM.
 The optional C<$flags> parameter can be used to control whether
 to query the setting of the live config or inactive config.
 
+=item $dom->set_guest_vcpus($cpumap, $state, [$flags=0])
+
+Set the online status of the guest OS CPUs. The C<$cpumap>
+parameter describes the set of CPUs to modify (eg "0-3,^1").
+C<$state> is either B<1> to set the CPUs online, or B<0>
+to set them offline. The C<$flags> parameter is currently
+unused and defaults to 0.
+
+=item $info $dom->get_guest_vcpus([$flags=0])
+
+Query information about the guest OS CPUs. The returned
+data is a hash reference with the following keys.
+
+=over 4
+
+=item B<vcpus>
+
+String containing bitmap representing CPU ids reported
+currently known to the guest.
+
+=item B<online>
+
+String containing bitmap representing CPU ids that are
+currently online in the guest.
+
+=item B<offlinable>
+
+String containing bitmap representing CPU ids that can
+be offlined in the guest.
+
+=back
+
+The C<$flags> parameter is currently unused and defaults to 0.
+
 =item $type = $dom->get_scheduler_type()
 
 Return the scheduler type for the guest domain
@@ -794,6 +846,23 @@ of the NUMA PARAMETERS constants. The C<$flags>
 parameter accepts one or more the CONFIG OPTION constants
 documented later, and defaults to 0 if omitted.
 
+=item my $params = $dom->get_perf_events($flags=0)
+
+Return a hash reference containing the set of performance
+events that are available for the guest. The keys in the
+hash are one of the constants PERF EVENTS described later.
+The C<$flags> parameter accepts one or more the CONFIG
+OPTION constants documented later, and defaults to 0 if
+omitted.
+
+=item $dom->set_perf_events($params, $flags=0)
+
+Update the enabled state for performance events for the
+guest. The C<$params> should be a hash reference whose
+keys are one of the PERF EVENTS constants. The C<$flags>
+parameter accepts one or more the CONFIG OPTION constants
+documented later, and defaults to 0 if omitted.
+
 =item $dom->block_resize($disk, $newsize, $flags=0)
 
 Resize the disk C<$disk> to have new size C<$newsize> KB. If the disk
@@ -883,6 +952,10 @@ Memory not used by the system
 =item C<available>
 
 Total memory seen by guest
+
+=item C<rss>
+
+Resident set size. Size of memory resident in host RAM.
 
 =back
 
@@ -975,7 +1048,11 @@ or ::). This default may be a security risk if guests, or other
 untrusted users have the ability to connect to the virtualization
 host, thus use of an explicit restricted listen address is recommended.
 
-=back
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_DISK_PORT>
+
+Port that destination server should use for incoming disks migration. Type is
+VIR_TYPED_PARAM_INT. If set to 0 or omitted, libvirt will choose a suitable
+default. At the moment this is only supported by the QEMU driver.
 
 =item C<Sys::Virt::Domain::MIGRATE_PARAM_MIGRATE_DISKS>
 
@@ -983,6 +1060,43 @@ The list of disks to migrate when doing block storage migration.
 In constrast to other parameters whose values are plain strings,
 the parameter value should be an array reference, whose elements
 are in turn strings representing the disk target names.
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_COMPRESSION>
+
+The type of compression method use use, either C<xbzrle> or
+C<mt>.
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_COMPRESSION_MT_THREADS>
+
+The number of compression threads to use
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_COMPRESSION_MT_DTHREADS>
+
+The number of decompression threads
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_COMPRESSION_MT_LEVEL>
+
+The compression level from 0 (no compression) to 9 (maximum
+compression)
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_COMPRESSION_XBZRLE_CACHE>
+
+The size of the cache for xbzrle compression
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_PERSIST_XML>
+
+The alternative persistent XML config to copy
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_AUTO_CONVERGE_INITIAL>
+
+The initial percentage to throttle guest vCPUs
+
+=item C<Sys::Virt::Domain::MIGRATE_PARAM_AUTO_CONVERGE_INCREMENT>
+
+The additional percentage step size to throttle guest vCPUs if
+progress is not made
+
+=back
 
 =item $ddom = $dom->migrate(destcon, flags=0, dname=undef, uri=undef, bandwidth=0)
 
@@ -1127,7 +1241,7 @@ sub migrate_to_uri2 {
 }
 
 
-=item $dom->migrate_set_max_downtime($downtime, $flags)
+=item $dom->migrate_set_max_downtime($downtime, $flags=0)
 
 Set the maximum allowed downtime during migration of the guest. A
 longer downtime makes it more likely that migration will complete,
@@ -1135,29 +1249,35 @@ at the cost of longer time blackout for the guest OS at the switch
 over point. The C<downtime> parameter is measured in milliseconds.
 The C<$flags> parameter is currently unused and defaults to zero.
 
-=item $dom->migrate_set_max_speed($bandwidth, $flags)
+=item $dom->migrate_set_max_speed($bandwidth, $flags=0)
 
 Set the maximum allowed bandwidth during migration of the guest.
 The C<bandwidth> parameter is measured in MB/second.
 The C<$flags> parameter is currently unused and defaults to zero.
 
-=item $bandwidth = $dom->migrate_get_max_speed($flag)
+=item $bandwidth = $dom->migrate_get_max_speed($flags=0)
 
 Get the maximum allowed bandwidth during migration fo the guest.
 The returned <bandwidth> value is measured in MB/second.
 The C<$flags> parameter is currently unused and defaults to zero.
 
-=item $dom->migrate_set_compression_cache($cacheSize, $flags)
+=item $dom->migrate_set_compression_cache($cacheSize, $flags=0)
 
 Set the maximum allowed compression cache size during migration of
 the guest. The C<cacheSize> parameter is measured in bytes.
 The C<$flags> parameter is currently unused and defaults to zero.
 
-=item $cacheSize = $dom->migrate_get_compression_cache($flag)
+=item $cacheSize = $dom->migrate_get_compression_cache($flags=0)
 
 Get the maximum allowed compression cache size during migration of
 the guest. The returned <bandwidth> value is measured in bytes.
 The C<$flags> parameter is currently unused and defaults to zero.
+
+=item $dom->migrate_start_post_copy($flags=0)
+
+Switch the domain from pre-copy to post-copy mode. This requires
+that the original migrate command had the C<Sys::Virt::Domain::MIGRATE_POST_COPY>
+flag specified.
 
 =item $dom->inject_nmi($flags)
 
@@ -1421,6 +1541,14 @@ The number of bytes transferred without any compression
 
 The bytes per second transferred
 
+=item Sys::Virt::Domain::JOB_MEMORY_DIRTY_RATE
+
+The number of memory pages dirtied per second
+
+=item Sys::Virt::Domain::JOB_MEMORY_ITERATION
+
+The total number of iterations over guest memory
+
 =item Sys::Virt::Domain::JOB_DISK_TOTAL
 
 The total amount of file expected to be processed by the job, in bytes.
@@ -1436,6 +1564,10 @@ The expected amount of file remaining to be processed by the job, in bytes.
 =item Sys::Virt::Domain::JOB_DISK_BPS
 
 The bytes per second transferred
+
+=item Sys::Virt::Domain::JOB_AUTO_CONVERGE_THROTTLE
+
+The percentage by which vCPUs are currently throttled
 
 =item Sys::Virt::Domain::JOB_COMPRESSION_CACHE
 
@@ -2243,6 +2375,10 @@ throttling guest runtime
 
 Pin memory for RDMA transfer
 
+=item Sys::Virt::Domain::MIGRATE_POSTCOPY
+
+Enable support for post-copy migration
+
 =back
 
 =head2 UNDEFINE CONSTANTS
@@ -2459,6 +2595,14 @@ The VCPU period tunable
 
 The VCPU quota tunable
 
+=item Sys::Virt::Domain::SCHEDULER_GLOBAL_PERIOD
+
+The VM global period tunable
+
+=item Sys::Virt::Domain::SCHEDULER_GLOBAL_QUOTA
+
+The VM global quota tunable
+
 =item Sys::Virt::Domain::SCHEDULER_WEIGHT
 
 The VM weight tunable
@@ -2520,6 +2664,10 @@ The peak inbound bandwidth
 
 The burstable inbound bandwidth
 
+=item Sys::Virt::Domain::BANDWIDTH_IN_FLOOR
+
+The minimum inbound bandwidth
+
 =item Sys::Virt::Domain::BANDWIDTH_OUT_AVERAGE
 
 The average outbound bandwidth
@@ -2531,6 +2679,33 @@ The peak outbound bandwidth
 =item Sys::Virt::Domain::BANDWIDTH_OUT_BURST
 
 The burstable outbound bandwidth
+
+=back
+
+=head2 PERF EVENTS
+
+The following constants defined performance events
+which can be monitored for a guest
+
+=over 4
+
+=item Sys::Virt::Domain::PERF_PARAM_CMT
+
+The CMT event counter which can be used to measure the usage of
+cache (bytes) by applications running on the platform. It
+corresponds to the "perf.cmt" field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_MBML
+
+The MBML event counter which can be used to monitor the amount of
+data (bytes/s) sent through the memory controller on the socket.
+It corresponds to the "perf.mbml" field in the *Stats APIs.
+
+=item Sys::Virt::Domain::PERF_PARAM_MBMT
+
+The MBMT event counter which can be used to monitor total system
+bandwidth (bytes/s) from one level of cache to another. It
+corresponds to the "perf.mbmt" field in the *Stats APIs.
 
 =back
 
@@ -2586,6 +2761,14 @@ The defined configuration is newly added
 
 The defined configuration is an update to an existing configuration
 
+=item Sys::Virt::Domain::EVENT_DEFINED_RENAMED
+
+The defined configuration is a rename of an existing configuration
+
+=item Sys::Virt::Domain::EVENT_DEFINED_FROM_SNAPSHOT
+
+The defined configuration was restored from a snapshot
+
 =back
 
 =item Sys::Virt::Domain::EVENT_RESUMED
@@ -2606,6 +2789,10 @@ The domain resumed because the admin unpaused it.
 =item Sys::Virt::Domain::EVENT_RESUMED_FROM_SNAPSHOT
 
 The domain resumed because it was restored from a snapshot
+
+=item Sys::Virt::Domain::EVENT_RESUMED_POSTCOPY
+
+The domain resumed but post-copy is running in background
 
 =back
 
@@ -2723,6 +2910,14 @@ The domain has been suspended due to restore from saved state
 
 The domain has been suspended due to an API error
 
+=item Sys::Virt::Domain::EVENT_SUSPENDED_POSTCOPY
+
+The domain has been suspended for post-copy migration
+
+=item Sys::Virt::Domain::EVENT_SUSPENDED_POSTCOPY_FAILED
+
+The domain has been suspended due post-copy migration failing
+
 =back
 
 =item Sys::Virt::Domain::EVENT_UNDEFINED
@@ -2735,6 +2930,10 @@ The persistent configuration has gone away
 
 The domain configuration has gone away due to it being
 removed by administrator.
+
+=item Sys::Virt::Domain::EVENT_UNDEFINED_RENAMED
+
+The undefined configuration is a rename of an existing configuration
 
 =back
 
@@ -2873,6 +3072,12 @@ The agent is now disconnected
 The second parameter, C<reason>, matches one of the following
 constants
 
+=item Sys::Virt::Domain::EVENT_ID_MIGRATION_ITERATION
+
+Domain migration progress iteration. The C<iteration> parameter
+to the callback will specify the number of iterations migration
+has made over guest RAM.
+
 =over 4
 
 =item Sys::Virt::Domain::EVENT_AGENT_LIFECYCLE_REASON_UNKNOWN
@@ -2888,6 +3093,17 @@ The domain was initially booted
 The channel on a running guest changed state
 
 =back
+
+=item Sys::Virt::Domain::EVENT_ID_JOB_COMPLETED
+
+Domain background job completion notification. The callback
+provides a hash containing the job stats. The keyus in the
+hash are the same as those used with the C<Sys::Virt::Domain::get_job_stats()>
+method.
+
+=item Sys::Virt::Domain::EVENT_ID_DEVICE_REMOVAL_FAILED
+
+Guest device removal has failed.
 
 =back
 
@@ -3625,6 +3841,10 @@ General lifecycle state
 
 Virtual CPU info
 
+=item Sys::Virt::Domain::STATS_PERF
+
+Performance event counter values
+
 =back
 
 =head2 PROCESS SIGNALS
@@ -3931,6 +4151,14 @@ VCPU thread period
 =item Sys::Virt::Domain::TUNABLE_CPU_VCPU_QUOTA
 
 VCPU thread quota
+
+=item Sys::Virt::Domain::TUNABLE_CPU_GLOBAL_PERIOD
+
+VM global period
+
+=item Sys::Virt::Domain::TUNABLE_CPU_GLOBAL_QUOTA
+
+VM global quota
 
 =item Sys::Virt::Domain::TUNABLE_BLKDEV_DISK
 
